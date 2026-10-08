@@ -1,0 +1,4 @@
+﻿-r requirements.txt
+pytest>=8.0.0
+pyinstaller>=6.5.0
+pytesseract>=0.3.10

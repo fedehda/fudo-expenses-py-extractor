@@ -1,0 +1,51 @@
+﻿# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*.class
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+*.egg
+*.spec.bak
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Secrets and environment configurations
+.env
+*.env
+!.env.example
+
+# Local SQLite databases & evaluation temporary DBs
+*.db
+*.sqlite
+*.sqlite3
+memoria.db
+eval_memoria.db
+
+# User working folders (receipts and generated files)
+input_tickets/
+output_fudo/
+procesados/
+
+# Real tickets and private test archives
+pruebas/tickets_reales/
+*.zip
+
+# Pytest & IDE
+.pytest_cache/
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS specific
+Thumbs.db
+Desktop.ini
+.DS_Store
+pruebas/*.xlsx
