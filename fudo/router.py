@@ -387,6 +387,19 @@ class RouterTickets:
                 self.memoria.agregar_senales(pid_guardado, senales)
                 proveedor_id_asoc = pid_guardado
 
+        # Guardar artículos en el histórico de precios
+        if extraccion.articulos:
+            self.memoria.guardar_articulos(
+                comprobante_hash=h,
+                fecha=fecha_str,
+                proveedor_id=proveedor_id_asoc,
+                proveedor_nombre=proveedor_final or extraccion.razon_social or "Sin identificar",
+                articulos=extraccion.articulos,
+                tipo_comprobante=tipo_comp,
+                numero_comprobante=num_comp,
+                archivo=ruta.name
+            )
+
         return ResultadoProcesamiento(
             archivo=ruta,
             hash_sha256=h,

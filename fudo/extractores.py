@@ -98,7 +98,7 @@ def construir_prompt(catalogo: CatalogoFudo, contexto_qr: Optional[str] = None, 
         "- Fechas en YYYY-MM-DD. Los comprobantes argentinos usan DD/MM/AAAA.",
         "- Importes: el punto es separador de miles y la coma decimal (1.234,50 = 1234.50).",
         "- monto_total = importe FINAL a pagar (con IVA, percepciones y descuentos).",
-        "- articulos: una entrada por línea con descripción legible, cantidad con unidad e importe de la línea.",
+        "- articulos: una entrada por línea con descripción legible, cantidad con texto, cantidad_numerica (ej: 1.5, 10.0), unidad_medida (kg, g, lts, un, pack, cajon), precio_unitario e importe de la línea.",
         "- tipo_comprobante: solo uno de " + ", ".join(catalogo.tipos_comprobante) + ". Remito/presupuesto/ticket a mano -> Remito.",
         "- medio_pago_impreso: SOLO si está escrito en el comprobante; si no, null.",
         "- huella: copiá TODO dato que identifique al emisor aunque no haya nombre: teléfonos/WhatsApp, alias/CBU/CVU, "

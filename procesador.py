@@ -89,7 +89,43 @@ def main():
         default=None,
         help="Límite de tiempo global en segundos para el proceso"
     )
+    parser.add_argument(
+        "--gui", "-g",
+        action="store_true",
+        help="Iniciar la interfaz gráfica de usuario (GUI) de control y precios"
+    )
+    parser.add_argument(
+        "--precios",
+        nargs="?",
+        const="output_fudo/Historico_Precios.xlsx",
+        default=None,
+        metavar="ARCHIVO_SALIDA",
+        help="Exportar histórico analítico de precios y comparador de proveedores a Excel"
+    )
     args = parser.parse_args()
+
+    # Modo 0: Interfaz Gráfica (GUI)
+    if args.gui:
+        from fudo.gui import iniciar_app
+        iniciar_app()
+        return
+
+    # Modo 0.1: Exportación analítica de precios
+    if args.precios:
+        from fudo.memoria import Memoria
+        from fudo.precios import exportar_historico_precios_excel
+        mem = Memoria(BASE_DIR / "memoria.db")
+        ruta_p = Path(args.precios).resolve()
+        if not ruta_p.is_absolute():
+            ruta_p = BASE_DIR / args.precios
+        items = mem.consultar_todos_los_articulos(limite=50000)
+        resumenes = mem.consultar_resumen_productos()
+        if not items:
+            print("[i] No hay compras registradas en el histórico de precios todavía.")
+            return
+        exportar_historico_precios_excel(items, resumenes, ruta_p)
+        print(f"[OK] Reporte analítico de precios generado en:\n     {ruta_p}")
+        return
 
     # Modo 1: Evaluación / Benchmarking
     if args.evaluar:

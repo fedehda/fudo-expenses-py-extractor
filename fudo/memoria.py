@@ -3,9 +3,16 @@ import sqlite3
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from .huella import Senales
+from .precios import (
+    ItemHistorico,
+    ResumenProducto,
+    calcular_resumen_producto,
+    inferir_precio_unitario,
+    normalizar_producto,
+)
 from .validaciones import cuit_valido, normalizar_texto, solo_digitos
 
 
@@ -72,6 +79,29 @@ class Memoria:
                     ultimo_error TEXT,
                     actualizado TIMESTAMP
                 )""")
+            c.execute("""
+                CREATE TABLE IF NOT EXISTS articulos_historico (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    comprobante_hash TEXT NOT NULL,
+                    fecha TEXT NOT NULL,
+                    proveedor_id INTEGER,
+                    proveedor_nombre TEXT NOT NULL,
+                    producto_original TEXT NOT NULL,
+                    producto_normalizado TEXT NOT NULL,
+                    cantidad_texto TEXT,
+                    cantidad_numerica REAL,
+                    unidad_medida TEXT,
+                    precio_unitario REAL,
+                    importe_total REAL,
+                    tipo_comprobante TEXT,
+                    numero_comprobante TEXT,
+                    archivo TEXT,
+                    creado TIMESTAMP
+                )""")
+            c.execute("CREATE INDEX IF NOT EXISTS idx_art_prod_norm ON articulos_historico(producto_normalizado)")
+            c.execute("CREATE INDEX IF NOT EXISTS idx_art_prov ON articulos_historico(proveedor_nombre)")
+            c.execute("CREATE INDEX IF NOT EXISTS idx_art_fecha ON articulos_historico(fecha)")
+            c.execute("CREATE INDEX IF NOT EXISTS idx_art_hash ON articulos_historico(comprobante_hash)")
 
     # ------------------------------------------------------------------ proveedores
     def obtener(self, pid: int) -> Optional[Dict[str, Any]]:
@@ -196,3 +226,140 @@ class Memoria:
     def es_pendiente(self, h: str) -> bool:
         with self._conn() as c:
             return c.execute("SELECT 1 FROM pendientes WHERE hash = ?", (h,)).fetchone() is not None
+
+    # ------------------------------------------------------------------ articulos y precios
+    def guardar_articulos(self, *, comprobante_hash: str, fecha: str, proveedor_id: Optional[int],
+                          proveedor_nombre: str, articulos: List[Any],
+                          tipo_comprobante: Optional[str] = None,
+                          numero_comprobante: Optional[str] = None,
+                          archivo: Optional[str] = None) -> int:
+        if not articulos or not comprobante_hash:
+            return 0
+        with self._conn() as c:
+            c.execute("DELETE FROM articulos_historico WHERE comprobante_hash = ?", (comprobante_hash,))
+            guardados = 0
+            ahora = datetime.now().isoformat(timespec="seconds")
+            for art in articulos:
+                desc = getattr(art, "descripcion", "") or ""
+                if not desc.strip():
+                    continue
+                prod_norm = normalizar_producto(desc)
+                cant_txt = getattr(art, "cantidad", None)
+                cant_num = getattr(art, "cantidad_numerica", None)
+                unidad = getattr(art, "unidad_medida", None)
+                p_unit = getattr(art, "precio_unitario", None)
+                imp = getattr(art, "importe", None)
+
+                p_unit_final = inferir_precio_unitario(imp, cant_num, p_unit)
+
+                c.execute("""
+                    INSERT INTO articulos_historico (
+                        comprobante_hash, fecha, proveedor_id, proveedor_nombre,
+                        producto_original, producto_normalizado, cantidad_texto,
+                        cantidad_numerica, unidad_medida, precio_unitario,
+                        importe_total, tipo_comprobante, numero_comprobante,
+                        archivo, creado
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    comprobante_hash, fecha, proveedor_id, proveedor_nombre or "Sin identificar",
+                    desc.strip(), prod_norm, cant_txt, cant_num, unidad,
+                    p_unit_final, imp, tipo_comprobante, numero_comprobante,
+                    archivo, ahora
+                ))
+                guardados += 1
+            return guardados
+
+    def consultar_todos_los_articulos(self, filtro_texto: Optional[str] = None,
+                                      filtro_proveedor: Optional[str] = None,
+                                      limite: int = 5000) -> List[ItemHistorico]:
+        query = "SELECT * FROM articulos_historico WHERE 1=1"
+        params = []
+        if filtro_texto and filtro_texto.strip():
+            query += " AND (producto_normalizado LIKE ? OR producto_original LIKE ?)"
+            patron = f"%{normalizar_producto(filtro_texto)}%"
+            params.extend([patron, f"%{filtro_texto.strip()}%"])
+        if filtro_proveedor and filtro_proveedor.strip() and filtro_proveedor != "Todos":
+            query += " AND proveedor_nombre = ?"
+            params.append(filtro_proveedor.strip())
+        query += " ORDER BY fecha DESC, id DESC LIMIT ?"
+        params.append(limite)
+
+        with self._conn() as c:
+            rows = c.execute(query, params).fetchall()
+            return [
+                ItemHistorico(
+                    id=r["id"],
+                    comprobante_hash=r["comprobante_hash"],
+                    fecha=r["fecha"],
+                    proveedor_id=r["proveedor_id"],
+                    proveedor_nombre=r["proveedor_nombre"],
+                    producto_original=r["producto_original"],
+                    producto_normalizado=r["producto_normalizado"],
+                    cantidad_texto=r["cantidad_texto"],
+                    cantidad_numerica=r["cantidad_numerica"],
+                    unidad_medida=r["unidad_medida"],
+                    precio_unitario=r["precio_unitario"],
+                    importe_total=r["importe_total"],
+                    tipo_comprobante=r["tipo_comprobante"],
+                    numero_comprobante=r["numero_comprobante"],
+                    archivo=r["archivo"]
+                ) for r in rows
+            ]
+
+    def consultar_resumen_productos(self, filtro_texto: Optional[str] = None,
+                                    filtro_proveedor: Optional[str] = None) -> List[ResumenProducto]:
+        items = self.consultar_todos_los_articulos(filtro_texto=filtro_texto,
+                                                   filtro_proveedor=filtro_proveedor,
+                                                   limite=10000)
+        grupos: Dict[str, List[ItemHistorico]] = {}
+        for it in items:
+            grupos.setdefault(it.producto_normalizado, []).append(it)
+
+        resumenes: List[ResumenProducto] = []
+        for prod_norm, lista in grupos.items():
+            res = calcular_resumen_producto(lista)
+            if res:
+                resumenes.append(res)
+
+        resumenes.sort(key=lambda x: x.nombre_mostrar.lower())
+        return resumenes
+
+    def consultar_historico_producto(self, producto_normalizado: str) -> List[ItemHistorico]:
+        with self._conn() as c:
+            rows = c.execute("""
+                SELECT * FROM articulos_historico
+                WHERE producto_normalizado = ?
+                ORDER BY fecha DESC, id DESC
+            """, (producto_normalizado,)).fetchall()
+            return [
+                ItemHistorico(
+                    id=r["id"],
+                    comprobante_hash=r["comprobante_hash"],
+                    fecha=r["fecha"],
+                    proveedor_id=r["proveedor_id"],
+                    proveedor_nombre=r["proveedor_nombre"],
+                    producto_original=r["producto_original"],
+                    producto_normalizado=r["producto_normalizado"],
+                    cantidad_texto=r["cantidad_texto"],
+                    cantidad_numerica=r["cantidad_numerica"],
+                    unidad_medida=r["unidad_medida"],
+                    precio_unitario=r["precio_unitario"],
+                    importe_total=r["importe_total"],
+                    tipo_comprobante=r["tipo_comprobante"],
+                    numero_comprobante=r["numero_comprobante"],
+                    archivo=r["archivo"]
+                ) for r in rows
+            ]
+
+    def consultar_alertas_aumento(self, umbral_pct: float = 10.0) -> List[ResumenProducto]:
+        resumenes = self.consultar_resumen_productos()
+        return [r for r in resumenes if r.variacion_pct >= umbral_pct and r.precio_anterior is not None]
+
+    def listar_proveedores_con_articulos(self) -> List[str]:
+        with self._conn() as c:
+            rows = c.execute("""
+                SELECT DISTINCT proveedor_nombre FROM articulos_historico
+                WHERE proveedor_nombre IS NOT NULL AND proveedor_nombre != ''
+                ORDER BY proveedor_nombre ASC
+            """).fetchall()
+            return [r["proveedor_nombre"] for r in rows]

@@ -19,6 +19,9 @@ class TipoDocumento(str, Enum):
 class Articulo(BaseModel):
     descripcion: str = Field(description="Producto o servicio, legible. Ej: 'Tomate perita'.")
     cantidad: Optional[str] = Field(None, description="Cantidad con unidad si figura. Ej: '10 kg', '2 cajones'.")
+    cantidad_numerica: Optional[float] = Field(None, description="Valor numérico de la cantidad si es deducible. Ej: 10.0.")
+    unidad_medida: Optional[str] = Field(None, description="Unidad de medida: kg, g, lts, ml, un, cajon, bolsa, pack, etc.")
+    precio_unitario: Optional[float] = Field(None, description="Precio unitario de la línea si figura o si se puede deducir.")
     importe: Optional[float] = Field(None, description="Importe total de la línea (cantidad x precio), si figura.")
 
 

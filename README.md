@@ -5,9 +5,9 @@
 [![Python Version](https://img.shields.io/badge/python-3.11%20%7C%203.12-blue.svg)](https://www.python.org/)
 [![AI Engine](https://img.shields.io/badge/AI-Gemini%203.5%20Flash%20Lite-orange.svg)](https://aistudio.google.com/)
 [![Validation](https://img.shields.io/badge/Schema-Pydantic%20v2-green.svg)](https://docs.pydantic.dev/)
-[![Tests](https://img.shields.io/badge/tests-13%20passed%20%7C%20100%25-brightgreen.svg)](pruebas/unit/)
+[![Tests](https://img.shields.io/badge/tests-17%20passed%20%7C%20100%25-brightgreen.svg)](pruebas/unit/)
 [![License](https://img.shields.io/badge/license-MIT-purple.svg)](LICENSE)
-[![Platform](https://img.shields.io/badge/platform-Windows%20Portable-lightgrey.svg)](https://github.com/)
+[![Platform](https://img.shields.io/badge/platform-Windows%20Portable%20%7C%20GUI-lightgrey.svg)](https://github.com/)
 
 ---
 
@@ -17,9 +17,9 @@ En el rubro gastronómico y comercial en Argentina, la carga manual de comproban
 
 - **Diversidad caótica de formatos:** Facturas electrónicas A/B/C con QR, tiques fiscales térmicos de controlador, remitos manuscritos sin membrete formal, recibos y fotos enviadas por WhatsApp con diferente iluminación y ángulo.
 - **Alto costo operativo y error humano:** Tiende a provocar discrepancias en CUITs, fechas invertidas, errores aritméticos entre neto/IVA e importes totales, y demoras de horas por semana para el personal contable.
-- **Falta de trazabilidad:** Proveedores habituales que emiten notas de entrega sin razón social impresa quedan sin asociar en el sistema.
+- **Falta de trazabilidad y descontrol de precios:** Proveedores habituales que cambian listas de precios sin previo aviso y artículos comprados a diferentes distribuidores sin un comparador unificado de precios unitarios.
 
-**FudoExtractor v2** automatiza este proceso de punta a punta: procesa lotes enteros de imágenes (JPG, PNG, PDF), extrae y valida los datos con precisión contable, y genera directamente el archivo oficial **`Plantilla-Gastos.xlsx`** de 11 columnas listo para importar en Fudo, clasificando alertas en una hoja de auditoría (`Revisar`).
+**FudoExtractor v2** automatiza este proceso de punta a punta: procesa lotes enteros de imágenes (JPG, PNG, PDF), extrae y valida los datos con precisión contable, genera directamente el archivo oficial **`Plantilla-Gastos.xlsx`** de 11 columnas listo para importar en Fudo, y construye un **catálogo histórico analítico de precios** con comparador del mejor proveedor y alertas de aumentos.
 
 ---
 
@@ -51,6 +51,10 @@ flowchart TD
     O -- Sí --> P[Hoja Gastos oficial Fudo 11 columnas]
     O -- Requiere atención --> Q[Hoja Revisar con alertas específicas]
     
+    P --> S[(Memoria Histórica de Artículos & Precios)]
+    S --> T[Comparador: Mejor vs Peor Proveedor]
+    S --> U[Alertas de Inflación / Variación %]
+    
     Q -. Corrección del usuario en Excel .-> R[Comando --aprender]
     R -. Actualiza memoria persistente .-> M
 ```
@@ -65,7 +69,7 @@ flowchart TD
 
 ### 2. Extracción Multimodal con Structured Outputs
 - Integración con el SDK oficial `google-genai` usando **Gemini 3.5 Flash Lite** (con fallback automático a `gemini-3.1-flash-lite` y OpenAI `gpt-4o-mini`).
-- Esquema estricto de Pydantic (`ExtraccionComprobante`) que desglosa líneas de artículos (producto, unidad, importe), evidencias del tipo de comprobante, datos de pago y huellas visuales.
+- Esquema estricto de Pydantic (`ExtraccionComprobante`) que desglosa líneas de artículos (producto, cantidad numérica, unidad de medida, precio unitario e importe), evidencias del tipo de comprobante, datos de pago y huellas visuales.
 - Manejo de saturación transitoria (códigos 429 / 503) con reintentos progresivos y backoff exponencial (3s, 6s, 9s).
 
 ### 3. Memoria Persistente de Proveedores y Motor de Huellas (*Fingerprint*)
@@ -76,11 +80,20 @@ flowchart TD
   - Términos léxicos frecuentes del rubro.
 - **Bucle de Aprendizaje Continuo (`--aprender`):** El usuario puede corregir el Excel generado y ejecutar `aprender.bat`; el sistema absorbe las correcciones y recuerda al proveedor para futuros comprobantes manuscritos.
 
-### 4. Validaciones Contables Duras
-- **Verificación de CUIT:** Algoritmo matemático Módulo 11 oficial de AFIP/ARCA.
-- **Coherencia Aritmética:** Control de suma de ítems contra el total del ticket, con tolerancias por alícuotas de IVA (21%, 10.5%) y percepciones impositivas (Ingresos Brutos).
-- **Control de Antigüedad:** Alerta preventiva sobre comprobantes emitidos fuera del período fiscal corriente (configurable vía `MAX_DIAS_ANTIGUEDAD`).
-- **Formato Oficial de Fecha:** Normalización determinística estricta a formato `dd-mm-aaaa` (día-mes-año con guiones) exigido por Fudo.
+### 4. Histórico de Precios, Comparador de Proveedores y Alertas de Inflación
+- **Normalización inteligente:** Algoritmo que elimina empaques y variantes de bulto (`cajón`, `bolsa`, `pack x 10`) preservando la tipología del producto (por ejemplo `harina 000` vs `harina 0000`).
+- **Comparador de Mejor Proveedor:** Identifica qué distribuidor vende cada insumo al menor precio unitario histórico y calcula el sobrecosto incurrido.
+- **Monitor de Variaciones (%):** Detecta aumentos bruscos entre compras consecutivas con semáforo de colores.
+- **Reporte Analítico en Excel:** Exportación automática a `Historico_Precios.xlsx` con 3 hojas estructuradas (Resumen/Comparador, Alertas de Aumento, Detalle Histórico).
+
+### 5. Interfaz Gráfica de Usuario (GUI de Escritorio)
+- Aplicación de escritorio nativa y ligera construida sobre `Tkinter/ttk` (inicio instantáneo, cero dependencias adicionales).
+- 5 pestañas operativas:
+  1. **📥 Procesar Comprobantes:** Ejecución en hilo secundario con barra de progreso y consola con colores en vivo.
+  2. **📊 Histórico de Precios:** Buscador en tiempo real, tabla comparativa de compras e histórico cronológico por producto.
+  3. **🚨 Alertas de Aumento:** Detector de inflación con umbral configurable de variación porcentual.
+  4. **🏢 Ficha de Proveedores:** Catálogo interactivo de insumos provistos por cada empresa con precios y fechas.
+  5. **🧠 Aprender / Evaluar:** Herramientas de absorción de correcciones y benchmarking con un solo clic.
 
 ---
 
@@ -110,10 +123,12 @@ fudo-expenses-py-extractor/
 │   ├── evaluador.py               # Motor de benchmarking y comparación contra gabaritos
 │   ├── excel.py                   # Generador de Plantilla-Gastos.xlsx y parser de aprendizaje
 │   ├── extractores.py             # Clientes de IA con Structured Outputs y fallback
+│   ├── gui.py                     # Interfaz gráfica de escritorio (Tkinter / ttk)
 │   ├── huella.py                  # Algoritmo de scoring bayesiano para comprobantes sin nombre
 │   ├── imagen.py                  # Preprocesamiento Pillow (downscaling a 1600px, rotación EXIF)
-│   ├── memoria.py                 # Capa de persistencia SQLite (conexiones limpias y seguras)
+│   ├── memoria.py                 # Capa de persistencia SQLite (proveedores y artículos históricos)
 │   ├── ocr_offline.py             # Contingencia sin conexión (EasyOCR / Tesseract)
+│   ├── precios.py                 # Analítica de precios, comparador y exportador Excel
 │   ├── qr_arca.py                 # Decodificador determinístico de QR AFIP/ARCA con zxing-cpp
 │   ├── router.py                  # Árbol de decisiones y pipeline central
 │   └── validaciones.py            # Módulo 11 de CUIT, sanitización y formateo de fechas
@@ -121,10 +136,12 @@ fudo-expenses-py-extractor/
 │   └── unit/                      # Tests unitarios determinísticos (pytest)
 │       ├── test_huella.py
 │       ├── test_memoria.py
+│       ├── test_precios.py
 │       ├── test_qr_arca.py
 │       └── test_validaciones.py
 ├── procesador.py                  # Punto de entrada CLI principal
 ├── crear_plantilla.py             # Generador de plantilla vacía de Fudo
+├── iniciar_gui.bat                # Lanzador directo de la interfaz gráfica
 ├── FudoExtractor.spec             # Especificación de empaquetado para PyInstaller
 ├── .env.example                   # Plantilla documentada de variables de entorno
 ├── requirements.txt               # Dependencias de producción
@@ -171,12 +188,26 @@ PAUSA_ENTRE_TICKETS=1.5
 
 ## 💻 Modos de Ejecución
 
-### Modo Estándar (Procesar comprobantes)
+### Modo Interfaz Gráfica (Recomendado para Usuario Final)
+Abre el panel interactivo con visualización de histórico y comparador:
+```bash
+python procesador.py --gui
+# O haciendo doble clic en iniciar_gui.bat
+```
+
+### Modo Estándar CLI (Procesar comprobantes)
 Coloca las imágenes o PDFs en `input_tickets/` y ejecuta:
 ```bash
 python procesador.py
 ```
 El archivo resultante se guardará en `output_fudo/Gastos_YYYYMMDD_HHMMSS.xlsx`.
+
+### Modo Exportar Histórico de Precios (`--precios`)
+Genera el reporte analítico multihioja en Excel con comparador de proveedores y alertas:
+```bash
+python procesador.py --precios
+```
+Generará `Historico_Precios_YYYYMMDD_HHMMSS.xlsx`.
 
 ### Modo Aprendizaje Continuo (`--aprender`)
 Si corregiste proveedores o categorías en el Excel generado:
