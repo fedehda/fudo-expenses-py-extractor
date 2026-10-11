@@ -755,11 +755,23 @@ class FudoExtractorGUI:
             res = aprender_de_excel(ruta, self.memoria, self.catalogo)
             conf = res.get("proveedores_confirmados", 0)
             rev = res.get("revisiones_procesadas", 0)
+            art = res.get("articulos_actualizados", 0)
             messagebox.showinfo("Aprendizaje Completado",
                                 f"Se procesó el archivo:\n{ruta.name}\n\n"
                                 f"• Proveedores confirmados en memoria: {conf}\n"
-                                f"• Revisiones y huellas asociadas: {rev}")
+                                f"• Revisiones y huellas asociadas: {rev}\n"
+                                f"• Artículos y precios actualizados: {art}")
+
+            # Refrescar absolutamente todas las vistas analíticas
             self._cargar_datos_precios()
+            if hasattr(self, "tree_alertas"):
+                self._cargar_alertas()
+            if hasattr(self, "combo_ficha_prov"):
+                provs = self.memoria.listar_proveedores_con_articulos()
+                self.combo_ficha_prov["values"] = provs
+                if provs and (not self.combo_ficha_prov.get() or self.combo_ficha_prov.get() not in provs):
+                    self.combo_ficha_prov.set(provs[0])
+                self._cargar_ficha_proveedor()
         except Exception as e:
             messagebox.showerror("Error en Aprendizaje", f"Ocurrió un error al leer el Excel:\n{e}")
 

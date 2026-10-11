@@ -269,3 +269,93 @@ def exportar_historico_precios_excel(items_todos: List[ItemHistorico],
     ruta_destino.parent.mkdir(parents=True, exist_ok=True)
     wb.save(ruta_destino)
     wb.close()
+
+
+def extraer_articulos_de_comentario(comentario: Optional[str], monto_total: float = 0.0) -> List[Dict[str, Any]]:
+    """Extrae productos, cantidades, unidades y precios del texto del comentario de Fudo."""
+    if not comentario or not str(comentario).strip():
+        return []
+    texto = str(comentario).strip()
+    # Eliminar prefijos entre corchetes, ej: [Huella 95%] o [REVISAR - OCR LOCAL]
+    texto = re.sub(r"^\[.*?\]\s*", "", texto).strip()
+    if not texto:
+        return []
+
+    # Detectar items que tienen formato "descripcion ($importe)"
+    # Ejemplo: '10 kg Harina 000 ($15,000.00), 2 lts Aceite ($4,500.00)'
+    patron_item = re.compile(r"([^,()]+(?:\([^$()]*\)[^,()]*)*)\s*\(\$([0-9.,]+)\)")
+    coincidencias = list(patron_item.finditer(texto))
+
+    items = []
+    if coincidencias:
+        for m in coincidencias:
+            desc_raw = m.group(1).strip()
+            imp_raw = m.group(2).strip()
+
+            # Normalizar separadores decimales/miles
+            if "." in imp_raw and "," in imp_raw:
+                if imp_raw.rfind(".") > imp_raw.rfind(","):
+                    imp_clean = imp_raw.replace(",", "")
+                else:
+                    imp_clean = imp_raw.replace(".", "").replace(",", ".")
+            elif "," in imp_raw:
+                imp_clean = imp_raw.replace(",", ".")
+            else:
+                imp_clean = imp_raw
+            try:
+                importe = float(imp_clean)
+            except ValueError:
+                importe = None
+
+            # Detectar cantidad y unidad prefijada: '10 kg Harina 000'
+            m_cant = re.match(
+                r"^(\d+(?:[.,]\d+)?)\s*(kg|kgr|gr|g|lts|lt|l|un|unid|unidades|pack|packs|bolsa|bolsas|cajon|cajones|doc|docenas)?\b\s*(.*)$",
+                desc_raw, re.I
+            )
+            cant_num = None
+            cant_txt = None
+            unidad = None
+            prod = desc_raw
+            if m_cant:
+                raw_c = m_cant.group(1).replace(",", ".")
+                try:
+                    cant_num = float(raw_c)
+                    cant_txt = m_cant.group(1)
+                except ValueError:
+                    pass
+                unidad = m_cant.group(2)
+                prod = m_cant.group(3).strip() or desc_raw
+
+            p_unit = round(importe / cant_num, 2) if (importe and cant_num and cant_num > 0) else importe
+            items.append({
+                "descripcion": prod,
+                "cantidad": cant_txt,
+                "cantidad_numerica": cant_num,
+                "unidad_medida": unidad,
+                "importe": importe,
+                "precio_unitario": p_unit
+            })
+    else:
+        # Texto plano sin formato ($monto), ej: 'Pollo fresco y verduras'
+        sub_items = [s.strip() for s in texto.split(",") if s.strip()]
+        if len(sub_items) > 1:
+            for s in sub_items:
+                items.append({
+                    "descripcion": s,
+                    "cantidad": None,
+                    "cantidad_numerica": None,
+                    "unidad_medida": None,
+                    "importe": None,
+                    "precio_unitario": None
+                })
+        else:
+            items.append({
+                "descripcion": texto,
+                "cantidad": None,
+                "cantidad_numerica": None,
+                "unidad_medida": None,
+                "importe": monto_total if monto_total > 0 else None,
+                "precio_unitario": monto_total if monto_total > 0 else None
+            })
+
+    return items

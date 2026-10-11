@@ -5,7 +5,7 @@
 [![Python Version](https://img.shields.io/badge/python-3.11%20%7C%203.12-blue.svg)](https://www.python.org/)
 [![AI Engine](https://img.shields.io/badge/AI-Gemini%203.5%20Flash%20Lite-orange.svg)](https://aistudio.google.com/)
 [![Validation](https://img.shields.io/badge/Schema-Pydantic%20v2-green.svg)](https://docs.pydantic.dev/)
-[![Tests](https://img.shields.io/badge/tests-18%20passed%20%7C%20100%25-brightgreen.svg)](pruebas/unit/)
+[![Tests](https://img.shields.io/badge/tests-19%20passed%20%7C%20100%25-brightgreen.svg)](pruebas/unit/)
 [![License](https://img.shields.io/badge/license-MIT-purple.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%20Portable%20%7C%20GUI-lightgrey.svg)](https://github.com/)
 

@@ -240,16 +240,24 @@ class Memoria:
             guardados = 0
             ahora = datetime.now().isoformat(timespec="seconds")
             for art in articulos:
-                desc = getattr(art, "descripcion", "") or ""
+                if isinstance(art, dict):
+                    desc = art.get("descripcion", "") or ""
+                    cant_txt = art.get("cantidad")
+                    cant_num = art.get("cantidad_numerica")
+                    unidad = art.get("unidad_medida")
+                    p_unit = art.get("precio_unitario")
+                    imp = art.get("importe")
+                else:
+                    desc = getattr(art, "descripcion", "") or ""
+                    cant_txt = getattr(art, "cantidad", None)
+                    cant_num = getattr(art, "cantidad_numerica", None)
+                    unidad = getattr(art, "unidad_medida", None)
+                    p_unit = getattr(art, "precio_unitario", None)
+                    imp = getattr(art, "importe", None)
+
                 if not desc.strip():
                     continue
                 prod_norm = normalizar_producto(desc)
-                cant_txt = getattr(art, "cantidad", None)
-                cant_num = getattr(art, "cantidad_numerica", None)
-                unidad = getattr(art, "unidad_medida", None)
-                p_unit = getattr(art, "precio_unitario", None)
-                imp = getattr(art, "importe", None)
-
                 p_unit_final = inferir_precio_unitario(imp, cant_num, p_unit)
 
                 c.execute("""
@@ -268,6 +276,57 @@ class Memoria:
                 ))
                 guardados += 1
             return guardados
+
+    def actualizar_proveedor_en_articulos(self, *,
+                                          archivo: Optional[str] = None,
+                                          numero_comprobante: Optional[str] = None,
+                                          comprobante_hash: Optional[str] = None,
+                                          proveedor_nombre: str,
+                                          proveedor_id: Optional[int] = None) -> int:
+        """Actualiza el nombre y/o ID de proveedor en las compras históricas asociadas a un archivo o factura."""
+        if not proveedor_nombre or proveedor_nombre.strip() in ("", "Sin identificar", "Proveedor No Identificado"):
+            return 0
+        condiciones = []
+        vals = []
+        if archivo and str(archivo).strip():
+            condiciones.append("archivo = ?")
+            vals.append(str(archivo).strip())
+        if numero_comprobante and str(numero_comprobante).strip():
+            condiciones.append("numero_comprobante = ?")
+            vals.append(str(numero_comprobante).strip())
+        if comprobante_hash and str(comprobante_hash).strip():
+            condiciones.append("comprobante_hash = ?")
+            vals.append(str(comprobante_hash).strip())
+
+        if not condiciones:
+            return 0
+
+        where_clause = " OR ".join(condiciones)
+        params = [proveedor_nombre.strip(), proveedor_id] + vals
+        with self._conn() as c:
+            cur = c.execute(f"""
+                UPDATE articulos_historico
+                SET proveedor_nombre = ?, proveedor_id = coalesce(?, proveedor_id)
+                WHERE {where_clause}
+            """, params)
+            return cur.rowcount
+
+    def existen_articulos_para_comprobante(self, *, archivo: Optional[str] = None,
+                                           numero_comprobante: Optional[str] = None) -> bool:
+        """Verifica si ya existen líneas registradas en el histórico para este comprobante."""
+        condiciones = []
+        params = []
+        if archivo and str(archivo).strip():
+            condiciones.append("archivo = ?")
+            params.append(str(archivo).strip())
+        if numero_comprobante and str(numero_comprobante).strip():
+            condiciones.append("numero_comprobante = ?")
+            params.append(str(numero_comprobante).strip())
+        if not condiciones:
+            return False
+        with self._conn() as c:
+            r = c.execute(f"SELECT 1 FROM articulos_historico WHERE {' OR '.join(condiciones)} LIMIT 1", params).fetchone()
+            return r is not None
 
     def consultar_todos_los_articulos(self, filtro_texto: Optional[str] = None,
                                       filtro_proveedor: Optional[str] = None,

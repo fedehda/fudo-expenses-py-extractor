@@ -143,59 +143,19 @@ class GestorExcel:
 
 
 def aprender_de_excel(ruta_excel: Path, memoria: Memoria, catalogo: Optional[CatalogoFudo] = None) -> Dict[str, Any]:
-    """Lee un archivo Excel corregido por el usuario e incorpora las correcciones a la memoria SQLite."""
+    """Lee un archivo Excel corregido por el usuario e incorpora las correcciones a la memoria SQLite y al histórico de precios."""
     if not ruta_excel.exists():
         raise FileNotFoundError(f"No existe el archivo {ruta_excel}")
+
+    import hashlib
+    from .precios import extraer_articulos_de_comentario
 
     wb = openpyxl.load_workbook(ruta_excel, data_only=True)
     confirmados = 0
     actualizados = 0
+    articulos_afectados = 0
     try:
-        # 1. Hoja de datos (Gastos o Gabarito)
-        hoja_datos = next((h for h in ("Gastos", "Gabarito") if h in wb.sheetnames), None)
-        if hoja_datos:
-            ws = wb[hoja_datos]
-            headers = {}
-            for col in range(1, ws.max_column + 1):
-                val = ws.cell(row=1, column=col).value
-                if val:
-                    headers[str(val).strip().lower()] = col
-
-            col_prov = headers.get("proveedor")
-            col_cat = headers.get("categoría") or headers.get("categoria")
-            col_pago = headers.get("medio de pago") or headers.get("medio_pago")
-            col_caja = headers.get("caja")
-            col_coment = headers.get("comentario")
-            col_monto = headers.get("monto")
-            col_fecha = headers.get("fecha")
-            col_cuit = headers.get("cuit")
-
-            for r in range(2, ws.max_row + 1):
-                prov = ws.cell(row=r, column=col_prov).value if col_prov else None
-                if not prov or str(prov).strip() in ("", "Sin identificar", "Proveedor No Identificado", "None"):
-                    continue
-
-                prov_str = str(prov).strip()
-                cat_str = str(ws.cell(row=r, column=col_cat).value).strip() if col_cat and ws.cell(row=r, column=col_cat).value else None
-                pago_str = str(ws.cell(row=r, column=col_pago).value).strip() if col_pago and ws.cell(row=r, column=col_pago).value else None
-                caja_str = str(ws.cell(row=r, column=col_caja).value).strip() if col_caja and ws.cell(row=r, column=col_caja).value else None
-                cuit_raw = str(ws.cell(row=r, column=col_cuit).value).strip() if col_cuit and ws.cell(row=r, column=col_cuit).value else None
-                c_clean = solo_digitos(cuit_raw) if cuit_raw and cuit_valido(solo_digitos(cuit_raw)) else None
-
-                # Guardar confirmación en memoria
-                pid = memoria.guardar_proveedor(
-                    cuit=c_clean,
-                    razon_social=prov_str,
-                    proveedor_fudo=prov_str,
-                    categoria=cat_str,
-                    caja=caja_str,
-                    medio_pago=pago_str,
-                    confirmado=True
-                )
-                if pid:
-                    confirmados += 1
-
-        # Si hay hoja Revisar, vincular las correcciones con los archivos y sus señales
+        # 1. Si hay hoja Revisar, vincular las correcciones con los archivos, proveedores y artículos
         if "Revisar" in wb.sheetnames:
             ws_rev = wb["Revisar"]
             headers_rev = {}
@@ -216,7 +176,7 @@ def aprender_de_excel(ruta_excel: Path, memoria: Memoria, catalogo: Optional[Cat
                 if prov_rev and str(prov_rev).strip() not in ("", "Sin identificar"):
                     p_str = str(prov_rev).strip()
                     c_clean = solo_digitos(cuit_rev) if cuit_rev and cuit_valido(solo_digitos(cuit_rev)) else None
-                    memoria.guardar_proveedor(
+                    pid = memoria.guardar_proveedor(
                         cuit=c_clean,
                         razon_social=p_str,
                         proveedor_fudo=p_str,
@@ -226,6 +186,97 @@ def aprender_de_excel(ruta_excel: Path, memoria: Memoria, catalogo: Optional[Cat
                         confirmado=True
                     )
                     actualizados += 1
+                    if arch:
+                        n_act = memoria.actualizar_proveedor_en_articulos(
+                            archivo=str(arch).strip(),
+                            proveedor_nombre=p_str,
+                            proveedor_id=pid
+                        )
+                        articulos_afectados += n_act
+
+        # 2. Hoja de datos (Gastos o Gabarito)
+        hoja_datos = next((h for h in ("Gastos", "Gabarito") if h in wb.sheetnames), None)
+        if hoja_datos:
+            ws = wb[hoja_datos]
+            headers = {}
+            for col in range(1, ws.max_column + 1):
+                val = ws.cell(row=1, column=col).value
+                if val:
+                    headers[str(val).strip().lower()] = col
+
+            col_prov = headers.get("proveedor")
+            col_cat = headers.get("categoría") or headers.get("categoria")
+            col_pago = headers.get("medio de pago") or headers.get("medio_pago")
+            col_caja = headers.get("caja")
+            col_coment = headers.get("comentario")
+            col_monto = headers.get("monto")
+            col_fecha = headers.get("fecha")
+            col_cuit = headers.get("cuit")
+            col_nro = headers.get("número de comprobante") or headers.get("numero de comprobante") or headers.get("numero")
+            col_tipo = headers.get("tipo de comprobante") or headers.get("tipo")
+
+            for r in range(2, ws.max_row + 1):
+                prov = ws.cell(row=r, column=col_prov).value if col_prov else None
+                if not prov or str(prov).strip() in ("", "Sin identificar", "Proveedor No Identificado", "None"):
+                    continue
+
+                prov_str = str(prov).strip()
+                cat_str = str(ws.cell(row=r, column=col_cat).value).strip() if col_cat and ws.cell(row=r, column=col_cat).value else None
+                pago_str = str(ws.cell(row=r, column=col_pago).value).strip() if col_pago and ws.cell(row=r, column=col_pago).value else None
+                caja_str = str(ws.cell(row=r, column=col_caja).value).strip() if col_caja and ws.cell(row=r, column=col_caja).value else None
+                cuit_raw = str(ws.cell(row=r, column=col_cuit).value).strip() if col_cuit and ws.cell(row=r, column=col_cuit).value else None
+                c_clean = solo_digitos(cuit_raw) if cuit_raw and cuit_valido(solo_digitos(cuit_raw)) else None
+
+                nro_comp = str(ws.cell(row=r, column=col_nro).value).strip() if col_nro and ws.cell(row=r, column=col_nro).value is not None else None
+                tipo_comp = str(ws.cell(row=r, column=col_tipo).value).strip() if col_tipo and ws.cell(row=r, column=col_tipo).value is not None else None
+                fecha_raw = ws.cell(row=r, column=col_fecha).value if col_fecha else None
+                fecha_str = formatear_fecha_fudo(fecha_raw) if fecha_raw else datetime.now().strftime("%d-%m-%Y")
+                monto_raw = ws.cell(row=r, column=col_monto).value if col_monto else 0.0
+                try:
+                    monto_float = float(monto_raw or 0.0)
+                except (ValueError, TypeError):
+                    monto_float = 0.0
+                coment_raw = str(ws.cell(row=r, column=col_coment).value or "").strip() if col_coment else ""
+
+                # Guardar confirmación en memoria
+                pid = memoria.guardar_proveedor(
+                    cuit=c_clean,
+                    razon_social=prov_str,
+                    proveedor_fudo=prov_str,
+                    categoria=cat_str,
+                    caja=caja_str,
+                    medio_pago=pago_str,
+                    confirmado=True
+                )
+                if pid:
+                    confirmados += 1
+
+                # A) Actualizar proveedor en artículos existentes si coinciden por número de factura
+                if nro_comp:
+                    n_act = memoria.actualizar_proveedor_en_articulos(
+                        numero_comprobante=nro_comp,
+                        proveedor_nombre=prov_str,
+                        proveedor_id=pid
+                    )
+                    articulos_afectados += n_act
+
+                # B) Si no existen artículos para este comprobante en la base de datos,
+                # recuperarlos e ingerirlos desde el comentario del Excel
+                if not memoria.existen_articulos_para_comprobante(numero_comprobante=nro_comp):
+                    articulos_extraidos = extraer_articulos_de_comentario(coment_raw, monto_total=monto_float)
+                    if articulos_extraidos:
+                        h_mock = hashlib.sha256(f"{prov_str}_{nro_comp}_{fecha_str}_{monto_float}_{r}".encode()).hexdigest()
+                        n_ins = memoria.guardar_articulos(
+                            comprobante_hash=h_mock,
+                            fecha=fecha_str,
+                            proveedor_id=pid,
+                            proveedor_nombre=prov_str,
+                            articulos=articulos_extraidos,
+                            tipo_comprobante=tipo_comp,
+                            numero_comprobante=nro_comp,
+                            archivo=None
+                        )
+                        articulos_afectados += n_ins
 
     finally:
         wb.close()
@@ -233,4 +284,5 @@ def aprender_de_excel(ruta_excel: Path, memoria: Memoria, catalogo: Optional[Cat
     return {
         "proveedores_confirmados": confirmados,
         "revisiones_procesadas": actualizados,
+        "articulos_actualizados": articulos_afectados,
     }

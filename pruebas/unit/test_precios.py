@@ -134,3 +134,38 @@ def test_memoria_articulos_sqlite():
         provs = mem.listar_proveedores_con_articulos()
         assert "Distribuidora San Juan" in provs
         assert "Verdulería Central" in provs
+
+
+def test_extraer_articulos_de_comentario():
+    from fudo.precios import extraer_articulos_de_comentario
+
+    # Comentario estándar con múltiples artículos
+    com1 = "[Huella 95%] 10 kg Harina 000 ($15,000.00), 2 lts Aceite de Girasol ($4,500.00)"
+    items1 = extraer_articulos_de_comentario(com1)
+    assert len(items1) == 2
+    assert items1[0]["descripcion"] == "Harina 000"
+    assert items1[0]["cantidad_numerica"] == 10.0
+    assert items1[0]["unidad_medida"] == "kg"
+    assert items1[0]["importe"] == 15000.0
+    assert items1[0]["precio_unitario"] == 1500.0
+
+    assert items1[1]["descripcion"] == "Aceite de Girasol"
+    assert items1[1]["cantidad_numerica"] == 2.0
+    assert items1[1]["unidad_medida"] == "lts"
+    assert items1[1]["importe"] == 4500.0
+    assert items1[1]["precio_unitario"] == 2250.0
+
+    # Comentario simple con importe total
+    com2 = "Pollo fresco ($25,000.00)"
+    items2 = extraer_articulos_de_comentario(com2)
+    assert len(items2) == 1
+    assert items2[0]["descripcion"] == "Pollo fresco"
+    assert items2[0]["importe"] == 25000.0
+    assert items2[0]["precio_unitario"] == 25000.0
+
+    # Comentario plano
+    com3 = "Artículos varios de limpieza"
+    items3 = extraer_articulos_de_comentario(com3, monto_total=8500.0)
+    assert len(items3) == 1
+    assert items3[0]["descripcion"] == "Artículos varios de limpieza"
+    assert items3[0]["importe"] == 8500.0

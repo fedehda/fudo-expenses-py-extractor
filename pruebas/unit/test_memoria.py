@@ -71,22 +71,49 @@ def test_aprender_de_excel_firmas():
         mem = Memoria(db_path)
         excel_path = Path(tmpdir) / "test_gastos.xlsx"
 
+        # Pre-cargar un artículo sin identificar asociado a ticket_viejo.jpg
+        mem.guardar_articulos(
+            comprobante_hash="hash_viejo",
+            fecha="05-10-2026",
+            proveedor_id=None,
+            proveedor_nombre="Sin identificar",
+            articulos=[{"descripcion": "Levadura fresca", "cantidad": "5 kg", "cantidad_numerica": 5.0, "importe": 8000.0}],
+            archivo="ticket_viejo.jpg"
+        )
+
         wb = openpyxl.Workbook()
         ws = wb.active
         ws.title = "Gastos"
         ws.append(["Fecha", "Monto", "Proveedor", "Categoría", "Comentario", "Tipo de comprobante",
                    "Número de comprobante", "Medio de pago", "Caja", "Fecha de pago", "Fecha de vencimiento", "CUIT"])
-        ws.append(["10-10-2026", 15000.0, "Distribuidora Pan SRL", "Panadería", "Compra pan", "Factura B",
+        ws.append(["10-10-2026", 15000.0, "Distribuidora Pan SRL", "Panadería",
+                   "[Huella 90%] 50 kg Harina 000 ($15,000.00)", "Factura B",
                    "1-100", "Efectivo", "Caja 1", "10-10-2026", "10-10-2026", "30709497401"])
+
+        ws_rev = wb.create_sheet(title="Revisar")
+        ws_rev.append(["Archivo", "Motivo de Revisión", "Tipo Detectado", "CUIT", "Proveedor Asignado",
+                       "Candidatos Sugeridos (Huella)", "Monto", "Estrategia Usada"])
+        ws_rev.append(["ticket_viejo.jpg", "Sin nombre", "Factura B", "30709497401", "Panadería Central",
+                       "Panadería Central (90%)", 8000.0, "IA"])
+
         wb.save(excel_path)
         wb.close()
 
-        # Probar llamada SIN catalogo
-        res1 = aprender_de_excel(excel_path, mem)
-        assert res1["proveedores_confirmados"] >= 1
-        assert mem.buscar_por_cuit("30-70949740-1") is not None
-
-        # Probar llamada CON catalogo
+        # Probar aprendizaje completo
         cat = CatalogoFudo()
-        res2 = aprender_de_excel(excel_path, mem, cat)
-        assert res2["proveedores_confirmados"] >= 1
+        res = aprender_de_excel(excel_path, mem, cat)
+
+        assert res["proveedores_confirmados"] >= 1
+        assert res["revisiones_procesadas"] >= 1
+        assert res["articulos_actualizados"] >= 2
+
+        # 1. Verificar que el artículo nuevo se ingirió en el histórico
+        arts = mem.consultar_todos_los_articulos(filtro_proveedor="Distribuidora Pan SRL")
+        assert len(arts) == 1
+        assert arts[0].producto_normalizado == "harina 000"
+        assert arts[0].precio_unitario == 300.0
+
+        # 2. Verificar que el artículo anterior de ticket_viejo.jpg se actualizó de 'Sin identificar' a 'Panadería Central'
+        arts_rev = mem.consultar_todos_los_articulos(filtro_proveedor="Panadería Central")
+        assert len(arts_rev) == 1
+        assert arts_rev[0].archivo == "ticket_viejo.jpg"
