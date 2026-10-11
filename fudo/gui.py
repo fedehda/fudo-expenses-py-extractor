@@ -752,7 +752,7 @@ class FudoExtractorGUI:
             return
 
         try:
-            res = aprender_de_excel(ruta, self.memoria)
+            res = aprender_de_excel(ruta, self.memoria, self.catalogo)
             conf = res.get("proveedores_confirmados", 0)
             rev = res.get("revisiones_procesadas", 0)
             messagebox.showinfo("Aprendizaje Completado",

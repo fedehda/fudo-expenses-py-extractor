@@ -142,7 +142,7 @@ class GestorExcel:
                 ws_rev.column_dimensions[col_letter].width = min(max(max_len + 2, 12), 40)
 
 
-def aprender_de_excel(ruta_excel: Path, memoria: Memoria, catalogo: CatalogoFudo) -> Dict[str, Any]:
+def aprender_de_excel(ruta_excel: Path, memoria: Memoria, catalogo: Optional[CatalogoFudo] = None) -> Dict[str, Any]:
     """Lee un archivo Excel corregido por el usuario e incorpora las correcciones a la memoria SQLite."""
     if not ruta_excel.exists():
         raise FileNotFoundError(f"No existe el archivo {ruta_excel}")
