@@ -186,6 +186,50 @@ class Memoria:
                     res[r["proveedor_id"]][1].setdefault(r["tipo"], set()).add(r["valor"])
         return {pid: v for pid, v in res.items() if v[1]}
 
+    def listar_proveedores_memoria(self) -> List[Dict[str, Any]]:
+        """Lista todos los proveedores registrados en la memoria SQLite con conteo de señales."""
+        with self._conn() as c:
+            rows = c.execute("""
+                SELECT p.*,
+                       (SELECT COUNT(*) FROM senales_proveedor s WHERE s.proveedor_id = p.id) as cant_senales,
+                       (SELECT COUNT(*) FROM comprobantes comp WHERE comp.proveedor_id = p.id) as cant_comprobantes
+                FROM proveedores_memoria p
+                ORDER BY p.confirmado DESC, p.proveedor_fudo ASC, p.razon_social ASC
+            """).fetchall()
+            return [dict(r) for r in rows]
+
+    def consultar_senales_proveedor(self, pid: int) -> List[Dict[str, Any]]:
+        """Devuelve la lista detallada de señales aprendidas para un proveedor."""
+        with self._conn() as c:
+            rows = c.execute("""
+                SELECT tipo, valor, veces, ultima
+                FROM senales_proveedor
+                WHERE proveedor_id = ?
+                ORDER BY tipo ASC, veces DESC, valor ASC
+            """, (pid,)).fetchall()
+            return [dict(r) for r in rows]
+
+    def guardar_senal_manual(self, pid: int, tipo: str, valor: str) -> bool:
+        """Agrega o refuerza manualmente una señal clave para un proveedor."""
+        tipo_clean = tipo.strip().lower()
+        val_clean = valor.strip().lower()
+        if not pid or not tipo_clean or not val_clean:
+            return False
+        ahora = datetime.now().isoformat(timespec="seconds")
+        with self._conn() as c:
+            c.execute("""INSERT INTO senales_proveedor (proveedor_id, tipo, valor, veces, ultima)
+                         VALUES (?, ?, ?, 5, ?)
+                         ON CONFLICT(proveedor_id, tipo, valor) DO UPDATE SET veces = veces + 3, ultima = excluded.ultima""",
+                      (pid, tipo_clean, val_clean, ahora))
+            return True
+
+    def eliminar_senal(self, pid: int, tipo: str, valor: str) -> bool:
+        """Elimina una señal incorrecta o ruidosa de un proveedor."""
+        with self._conn() as c:
+            c.execute("DELETE FROM senales_proveedor WHERE proveedor_id = ? AND tipo = ? AND valor = ?",
+                      (pid, tipo, valor))
+            return True
+
     # ------------------------------------------------------------------ comprobantes / duplicados
     def hash_procesado(self, h: str) -> Optional[str]:
         with self._conn() as c:

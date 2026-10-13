@@ -111,12 +111,14 @@ class FudoExtractorGUI:
 
         # Crear contenedores de pestañas
         self.tab_procesar = ttk.Frame(self.notebook)
+        self.tab_entrenamiento = ttk.Frame(self.notebook)
         self.tab_precios = ttk.Frame(self.notebook)
         self.tab_alertas = ttk.Frame(self.notebook)
         self.tab_proveedor = ttk.Frame(self.notebook)
         self.tab_herramientas = ttk.Frame(self.notebook)
 
         self.notebook.add(self.tab_procesar, text="📥 Procesar Comprobantes")
+        self.notebook.add(self.tab_entrenamiento, text="🎯 Entrenamiento de Proveedores")
         self.notebook.add(self.tab_precios, text="📊 Histórico de Precios")
         self.notebook.add(self.tab_alertas, text="🚨 Alertas de Aumento")
         self.notebook.add(self.tab_proveedor, text="🏢 Ficha Proveedores")
@@ -124,6 +126,7 @@ class FudoExtractorGUI:
 
         # Construir cada pestaña
         self._construir_tab_procesar()
+        self._construir_tab_entrenamiento()
         self._construir_tab_precios()
         self._construir_tab_alertas()
         self._construir_tab_proveedor()
@@ -387,6 +390,397 @@ class FudoExtractorGUI:
     def _abrir_ultimo_excel(self):
         if self.ultimo_excel_generado and self.ultimo_excel_generado.exists():
             os.startfile(self.ultimo_excel_generado)
+
+    # =========================================================================
+    # PESTAÑA: ENTRENAMIENTO DE PROVEEDORES
+    # =========================================================================
+    def _construir_tab_entrenamiento(self):
+        frame = self.tab_entrenamiento
+
+        # 1. Selector y datos contables del Proveedor a Entrenar
+        top_frame = ttk.LabelFrame(frame, text=" 🎯 Proveedor Objetivo para Entrenamiento ", padding=10)
+        top_frame.pack(fill="x", padx=10, pady=6)
+
+        # Fila 0: Selector de proveedor
+        lbl_p = ttk.Label(top_frame, text="Proveedor:", font=("Segoe UI", 9, "bold"))
+        lbl_p.grid(row=0, column=0, sticky="w", pady=4)
+
+        lista_provs = sorted(list(set(self.catalogo.proveedores)))
+        self.var_entrenar_prov = tk.StringVar()
+        self.combo_entrenar_prov = ttk.Combobox(top_frame, textvariable=self.var_entrenar_prov,
+                                                values=lista_provs, width=32)
+        self.combo_entrenar_prov.grid(row=0, column=1, padx=6, pady=4, sticky="w")
+        self.combo_entrenar_prov.bind("<<ComboboxSelected>>", lambda _: self._on_proveedor_entrenamiento_cambiado())
+
+        btn_nuevo_p = ttk.Button(top_frame, text="➕ Cargar / Refrescar", style="Action.TButton",
+                                 command=self._cargar_proveedores_entrenamiento)
+        btn_nuevo_p.grid(row=0, column=2, padx=4, pady=4, sticky="w")
+
+        # Fila 1: Datos contables automáticos vinculados (CUIT, Categoría, Caja, Medio Pago)
+        lbl_cuit = ttk.Label(top_frame, text="CUIT:")
+        lbl_cuit.grid(row=1, column=0, sticky="w", pady=4)
+        self.var_entrenar_cuit = tk.StringVar()
+        self.ent_entrenar_cuit = ttk.Entry(top_frame, textvariable=self.var_entrenar_cuit, width=18)
+        self.ent_entrenar_cuit.grid(row=1, column=1, padx=6, pady=4, sticky="w")
+
+        lbl_cat = ttk.Label(top_frame, text="Categoría Fudo:")
+        lbl_cat.grid(row=1, column=2, sticky="w", pady=4)
+        self.var_entrenar_cat = tk.StringVar()
+        self.combo_entrenar_cat = ttk.Combobox(top_frame, textvariable=self.var_entrenar_cat,
+                                               values=self.catalogo.categorias, width=24)
+        self.combo_entrenar_cat.grid(row=1, column=3, padx=6, pady=4, sticky="w")
+
+        lbl_caja = ttk.Label(top_frame, text="Caja:")
+        lbl_caja.grid(row=1, column=4, sticky="w", pady=4)
+        self.var_entrenar_caja = tk.StringVar()
+        self.combo_entrenar_caja = ttk.Combobox(top_frame, textvariable=self.var_entrenar_caja,
+                                                values=self.catalogo.cajas, width=14)
+        self.combo_entrenar_caja.grid(row=1, column=5, padx=6, pady=4, sticky="w")
+
+        lbl_mp = ttk.Label(top_frame, text="Medio Pago:")
+        lbl_mp.grid(row=1, column=6, sticky="w", pady=4)
+        self.var_entrenar_mp = tk.StringVar()
+        self.combo_entrenar_mp = ttk.Combobox(top_frame, textvariable=self.var_entrenar_mp,
+                                              values=self.catalogo.medios_pago, width=16)
+        self.combo_entrenar_mp.grid(row=1, column=7, padx=6, pady=4, sticky="w")
+
+        btn_guardar_datos = ttk.Button(top_frame, text="💾 Guardar Parámetros", style="Primary.TButton",
+                                       command=self._guardar_parametros_proveedor_entrenado)
+        btn_guardar_datos.grid(row=1, column=8, padx=6, pady=4, sticky="e")
+
+        # 2. Panel Central Dividido: Huellas en Memoria vs Ingesta de Entrenamiento
+        paned = ttk.PanedWindow(frame, orient="horizontal")
+        paned.pack(fill="both", expand=True, padx=10, pady=6)
+
+        # Panel Izquierdo: Señales y Huella Identificatoria Actual
+        frame_izq = ttk.LabelFrame(paned, text=" 🧬 Señales y Huella Aprendida (Memoria Activa) ", padding=8)
+        paned.add(frame_izq, weight=3)
+
+        cols_s = ("tipo", "valor", "veces", "ultima")
+        self.tree_senales = ttk.Treeview(frame_izq, columns=cols_s, show="headings", selectmode="browse")
+        self.tree_senales.heading("tipo", text="Tipo Señal")
+        self.tree_senales.heading("valor", text="Patrón / Valor")
+        self.tree_senales.heading("veces", text="Frecuencia")
+        self.tree_senales.heading("ultima", text="Última Detección")
+
+        self.tree_senales.column("tipo", width=90, anchor="center")
+        self.tree_senales.column("valor", width=200, anchor="w")
+        self.tree_senales.column("veces", width=70, anchor="center")
+        self.tree_senales.column("ultima", width=110, anchor="center")
+
+        scroll_s = ttk.Scrollbar(frame_izq, orient="vertical", command=self.tree_senales.yview)
+        self.tree_senales.configure(yscrollcommand=scroll_s.set)
+        self.tree_senales.pack(side="left", fill="both", expand=True)
+        scroll_s.pack(side="right", fill="y")
+
+        # Botonera inferior señales
+        f_btn_sen = ttk.Frame(frame_izq)
+        f_btn_sen.pack(fill="x", side="bottom", pady=4)
+
+        btn_del_sen = ttk.Button(f_btn_sen, text="🗑 Eliminar Señal Ruidosa", style="Action.TButton",
+                                 command=self._eliminar_senal_seleccionada)
+        btn_del_sen.pack(side="left", padx=4)
+
+        btn_add_sen = ttk.Button(f_btn_sen, text="➕ Agregar Señal Manual...", style="Action.TButton",
+                                 command=self._agregar_senal_manual_dialog)
+        btn_add_sen.pack(side="left", padx=4)
+
+        # Panel Derecho: Entrenar Lote de Comprobantes para este Proveedor
+        frame_der = ttk.LabelFrame(paned, text=" ⚡ Ingesta Rápida y Entrenamiento por Lote ", padding=10)
+        paned.add(frame_der, weight=4)
+
+        lbl_inst = ttk.Label(frame_der, text="Selecciona una carpeta o archivos del mismo proveedor:\n"
+                                             "La IA extraerá todas las señales en común (teléfonos, CBU, encabezados, artículos),\n"
+                                             "reforzará la certeza bayesiana y renombrará las imágenes a 'fecha_proveedor'.",
+                             justify="left")
+        lbl_inst.pack(anchor="w", pady=(0, 6))
+
+        # Carpeta o archivos
+        f_origen = ttk.Frame(frame_der)
+        f_origen.pack(fill="x", pady=4)
+
+        lbl_org = ttk.Label(f_origen, text="Carpeta de Muestras:")
+        lbl_org.pack(anchor="w")
+
+        self.var_dir_entrenamiento = tk.StringVar(value=str(self.base_dir / "input_tickets"))
+        ent_org = ttk.Entry(f_origen, textvariable=self.var_dir_entrenamiento, width=38)
+        ent_org.pack(side="left", fill="x", expand=True, padx=(0, 6), pady=2)
+
+        btn_browse_ent = ttk.Button(f_origen, text="Examinar...", style="Action.TButton",
+                                    command=self._examinar_dir_entrenamiento)
+        btn_browse_ent.pack(side="left", pady=2)
+
+        # Opciones de procesamiento durante el entrenamiento
+        f_opt_ent = ttk.Frame(frame_der)
+        f_opt_ent.pack(fill="x", pady=4)
+
+        self.var_ent_renombrar = tk.BooleanVar(value=True)
+        chk_ent_ren = ttk.Checkbutton(f_opt_ent, text="Renombrar a 'fecha_proveedor' al archivar",
+                                      variable=self.var_ent_renombrar)
+        chk_ent_ren.pack(side="left", padx=(0, 10))
+
+        self.var_ent_precios = tk.BooleanVar(value=True)
+        chk_ent_prec = ttk.Checkbutton(f_opt_ent, text="Indexar artículos e histórico de precios",
+                                       variable=self.var_ent_precios)
+        chk_ent_prec.pack(side="left")
+
+        # Botón de Ejecutar Entrenamiento
+        self.btn_entrenar_lote = ttk.Button(frame_der, text="🚀  Iniciar Entrenamiento Intensivo del Proveedor",
+                                            style="Primary.TButton", command=self._iniciar_entrenamiento_intensivo)
+        self.btn_entrenar_lote.pack(anchor="w", pady=8)
+
+        # Consola de progreso del entrenamiento
+        self.txt_log_entrenamiento = ScrolledText(frame_der, wrap="word", height=10, font=("Consolas", 8),
+                                                  bg="#1E1E1E", fg="#F8F9F9", insertbackground="#FFFFFF")
+        self.txt_log_entrenamiento.pack(fill="both", expand=True, pady=4)
+        self.txt_log_entrenamiento.tag_config("ok", foreground="#2ECC71")
+        self.txt_log_entrenamiento.tag_config("info", foreground="#3498DB")
+        self.txt_log_entrenamiento.tag_config("dim", foreground="#95A5A6")
+        self.txt_log_entrenamiento.tag_config("warn", foreground="#F39C12")
+        self.txt_log_entrenamiento.tag_config("err", foreground="#E74C3C")
+
+        # Cargar lista de proveedores
+        self._cargar_proveedores_entrenamiento()
+
+    def _cargar_proveedores_entrenamiento(self):
+        provs_db = self.memoria.listar_proveedores_memoria()
+        nombres = set(self.catalogo.proveedores)
+        for p in provs_db:
+            if p.get("proveedor_fudo"):
+                nombres.add(p["proveedor_fudo"])
+            if p.get("razon_social"):
+                nombres.add(p["razon_social"])
+
+        lista = sorted(list(nombres))
+        self.combo_entrenar_prov["values"] = lista
+        if lista and not self.var_entrenar_prov.get():
+            self.combo_entrenar_prov.set(lista[0])
+            self._on_proveedor_entrenamiento_cambiado()
+
+    def _on_proveedor_entrenamiento_cambiado(self):
+        prov_nom = self.var_entrenar_prov.get().strip()
+        if not prov_nom:
+            return
+
+        # Buscar datos en memoria SQLite
+        prov_data = self.memoria.buscar_por_nombre(prov_nom)
+        if prov_data:
+            self.var_entrenar_cuit.set(prov_data.get("cuit") or "")
+            self.var_entrenar_cat.set(prov_data.get("categoria_habitual") or "")
+            self.var_entrenar_caja.set(prov_data.get("caja_habitual") or "Principal")
+            self.var_entrenar_mp.set(prov_data.get("medio_pago_habitual") or "")
+            pid = prov_data["id"]
+        else:
+            self.var_entrenar_cuit.set("")
+            self.var_entrenar_cat.set("Compras y proveedores")
+            self.var_entrenar_caja.set("Principal")
+            self.var_entrenar_mp.set("Transferencia")
+            pid = None
+
+        self._cargar_senales_proveedor(pid)
+
+    def _cargar_senales_proveedor(self, pid: Optional[int]):
+        for it in self.tree_senales.get_children():
+            self.tree_senales.delete(it)
+
+        if not pid:
+            return
+
+        senales = self.memoria.consultar_senales_proveedor(pid)
+        for s in senales:
+            self.tree_senales.insert("", "end", values=(s["tipo"], s["valor"], s["veces"], s["ultima"] or "-"))
+
+    def _guardar_parametros_proveedor_entrenado(self):
+        prov = self.var_entrenar_prov.get().strip()
+        if not prov:
+            messagebox.showwarning("Atención", "Debes ingresar o seleccionar un nombre de proveedor.")
+            return
+
+        cuit_val = self.var_entrenar_cuit.get().strip() or None
+        cat_val = self.var_entrenar_cat.get().strip() or None
+        caja_val = self.var_entrenar_caja.get().strip() or None
+        mp_val = self.var_entrenar_mp.get().strip() or None
+
+        pid = self.memoria.guardar_proveedor(
+            cuit=cuit_val,
+            razon_social=prov,
+            proveedor_fudo=prov,
+            categoria=cat_val,
+            caja=caja_val,
+            medio_pago=mp_val,
+            confirmado=True
+        )
+        messagebox.showinfo("Guardado", f"Parámetros contables de '{prov}' actualizados en memoria (ID #{pid}).")
+        self._cargar_proveedores_entrenamiento()
+        self._cargar_senales_proveedor(pid)
+
+    def _eliminar_senal_seleccionada(self):
+        sel = self.tree_senales.selection()
+        if not sel:
+            messagebox.showinfo("Aviso", "Selecciona una señal de la lista para eliminar.")
+            return
+        vals = self.tree_senales.item(sel[0], "values")
+        tipo, valor = vals[0], vals[1]
+
+        prov_nom = self.var_entrenar_prov.get().strip()
+        prov_data = self.memoria.buscar_por_nombre(prov_nom)
+        if not prov_data:
+            return
+
+        if messagebox.askyesno("Confirmar", f"¿Eliminar la señal '{tipo}: {valor}' de '{prov_nom}'?"):
+            self.memoria.eliminar_senal(prov_data["id"], tipo, valor)
+            self._cargar_senales_proveedor(prov_data["id"])
+
+    def _agregar_senal_manual_dialog(self):
+        prov_nom = self.var_entrenar_prov.get().strip()
+        prov_data = self.memoria.buscar_por_nombre(prov_nom)
+        if not prov_data:
+            messagebox.showwarning("Aviso", "Primero guarda los parámetros del proveedor antes de agregar señales.")
+            return
+
+        diag = tk.Toplevel(self.root)
+        diag.title("Agregar Señal de Huella")
+        diag.geometry("380x210")
+        diag.resizable(False, False)
+        diag.transient(self.root)
+        diag.grab_set()
+
+        lbl_t = ttk.Label(diag, text="Tipo de Señal:")
+        lbl_t.pack(anchor="w", padx=16, pady=(12, 2))
+        combo_t = ttk.Combobox(diag, values=["telefono", "alias_cbu", "direccion", "encabezado", "cuit", "email", "items"],
+                               state="readonly")
+        combo_t.set("telefono")
+        combo_t.pack(fill="x", padx=16, pady=2)
+
+        lbl_v = ttk.Label(diag, text="Valor / Patrón (ej: 1145678901 o alias.mp):")
+        lbl_v.pack(anchor="w", padx=16, pady=(8, 2))
+        ent_v = ttk.Entry(diag)
+        ent_v.pack(fill="x", padx=16, pady=2)
+
+        def _guardar():
+            t = combo_t.get().strip()
+            v = ent_v.get().strip()
+            if not v:
+                return
+            self.memoria.guardar_senal_manual(prov_data["id"], t, v)
+            self._cargar_senales_proveedor(prov_data["id"])
+            diag.destroy()
+
+        btn_g = ttk.Button(diag, text="Guardar Señal", style="Primary.TButton", command=_guardar)
+        btn_g.pack(pady=14)
+
+    def _examinar_dir_entrenamiento(self):
+        d = filedialog.askdirectory(initialdir=self.var_dir_entrenamiento.get(),
+                                    title="Carpeta de Muestras del Proveedor")
+        if d:
+            self.var_dir_entrenamiento.set(d)
+
+    def _log_ent(self, texto: str, tag: str = "dim"):
+        self.txt_log_entrenamiento.insert("end", texto, tag)
+        self.txt_log_entrenamiento.see("end")
+
+    def _iniciar_entrenamiento_intensivo(self):
+        if self.procesando:
+            messagebox.showwarning("Ocupado", "Ya hay un proceso de extracción o entrenamiento en curso.")
+            return
+
+        prov = self.var_entrenar_prov.get().strip()
+        if not prov:
+            messagebox.showwarning("Atención", "Selecciona o ingresa el proveedor objetivo a entrenar.")
+            return
+
+        dir_m = Path(self.var_dir_entrenamiento.get())
+        if not dir_m.exists():
+            messagebox.showerror("Error", f"La carpeta de muestras no existe:\n{dir_m}")
+            return
+
+        self.procesando = True
+        self.btn_entrenar_lote.configure(state="disabled")
+        self.lbl_status.config(text=f"Entrenando modelo para '{prov}'...")
+
+        hilo = threading.Thread(target=self._worker_entrenamiento_intensivo, args=(prov, dir_m), daemon=True)
+        hilo.start()
+
+    def _worker_entrenamiento_intensivo(self, proveedor: str, dir_muestras: Path):
+        from .config import EXTENSIONES_VALIDAS
+        archivos = sorted([p for p in dir_muestras.iterdir() if p.is_file() and p.suffix.lower() in EXTENSIONES_VALIDAS])
+
+        self.root.after(0, self._log_ent, f"\n[{datetime.now().strftime('%H:%M:%S')}] Iniciando sesión de entrenamiento para '{proveedor}'\n", "info")
+        self.root.after(0, self._log_ent, f"[*] Comprobantes de entrenamiento detectados: {len(archivos)}\n", "info")
+
+        if not archivos:
+            self.root.after(0, self._log_ent, "[!] No hay archivos compatibles en la carpeta.\n", "warn")
+            self.root.after(0, self._finalizar_entrenamiento)
+            return
+
+        # Asegurar proveedor confirmado en memoria
+        cuit_val = self.var_entrenar_cuit.get().strip() or None
+        cat_val = self.var_entrenar_cat.get().strip() or None
+        caja_val = self.var_entrenar_caja.get().strip() or None
+        mp_val = self.var_entrenar_mp.get().strip() or None
+        pid = self.memoria.guardar_proveedor(
+            cuit=cuit_val,
+            razon_social=proveedor,
+            proveedor_fudo=proveedor,
+            categoria=cat_val,
+            caja=caja_val,
+            medio_pago=mp_val,
+            confirmado=True
+        )
+
+        router = RouterTickets(catalogo=self.catalogo, memoria=self.memoria, motor_ia=self.motor_ia)
+        lote_id = f"train_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+
+        renombrar = self.var_ent_renombrar.get()
+        senales_nuevas = 0
+
+        for idx, arch in enumerate(archivos, start=1):
+            msg = f"[{idx}/{len(archivos)}] Analizando '{arch.name}'..."
+            self.root.after(0, self._log_ent, msg, "dim")
+
+            res = router.procesar(arch, lote_id=lote_id, proveedor_fijado=proveedor)
+
+            if res.estado in ("OK", "REVISAR"):
+                senales_nuevas += 1
+                detalle = f" -> [ENTRENADO] {arch.name} procesado y huella consolidada.\n"
+                tag = "ok"
+
+                # Archivar con renombrado si está activo
+                if renombrar:
+                    dir_proc = self.base_dir / "procesados"
+                    dir_proc.mkdir(exist_ok=True)
+                    try:
+                        import shutil
+                        fecha_val = res.fila_gastos.get("fecha") if res.fila_gastos else datetime.now().strftime("%Y-%m-%d")
+                        num_comp = res.fila_gastos.get("numero_comprobante") if res.fila_gastos else None
+                        nuevo_nombre = generar_nombre_estandarizado(fecha_val, proveedor, arch.suffix, num_comp)
+                        dest_arch = dir_proc / nuevo_nombre
+                        if dest_arch.exists():
+                            dest_arch = dir_proc / f"{dest_arch.stem}_{datetime.now().strftime('%H%M%S')}{dest_arch.suffix}"
+                        shutil.move(str(arch), str(dest_arch))
+                        detalle += f"    -> Archivo archivado como: {dest_arch.name}\n"
+                    except Exception as e:
+                        detalle += f"    [!] Error al mover archivo: {e}\n"
+            else:
+                detalle = f" -> [{res.estado}] {'; '.join(res.motivos)}\n"
+                tag = "warn"
+
+            self.root.after(0, self._log_ent, detalle, tag)
+
+        self.root.after(0, self._log_ent, f"\n[COMPLETADO] Sesión de entrenamiento finalizada. Señales consolidadas.\n", "ok")
+        self.root.after(0, self._finalizar_entrenamiento)
+
+    def _finalizar_entrenamiento(self):
+        self.procesando = False
+        self.btn_entrenar_lote.configure(state="normal")
+        self.lbl_status.config(text="Entrenamiento de proveedor completado.")
+        # Recargar señales en el árbol
+        prov_nom = self.var_entrenar_prov.get().strip()
+        prov_data = self.memoria.buscar_por_nombre(prov_nom)
+        if prov_data:
+            self._cargar_senales_proveedor(prov_data["id"])
+        # Refrescar histórico de precios
+        self._cargar_datos_precios()
 
     # =========================================================================
     # PESTAÑA 2: HISTÓRICO DE PRECIOS & COMPARADOR

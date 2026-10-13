@@ -117,3 +117,41 @@ def test_aprender_de_excel_firmas():
         arts_rev = mem.consultar_todos_los_articulos(filtro_proveedor="Panadería Central")
         assert len(arts_rev) == 1
         assert arts_rev[0].archivo == "ticket_viejo.jpg"
+
+
+def test_senales_entrenamiento_gestion():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db_path = Path(tmpdir) / "test_senales.db"
+        mem = Memoria(db_path)
+
+        pid = mem.guardar_proveedor(
+            cuit="30112233445",
+            razon_social="Molino Cañuelas S.A.",
+            proveedor_fudo="Molino Cañuelas",
+            categoria="Panadería",
+            caja="Principal",
+            medio_pago="Transferencia",
+            confirmado=True
+        )
+
+        # 1. Agregar señales manuales
+        assert mem.guardar_senal_manual(pid, "telefono", "1145678900") is True
+        assert mem.guardar_senal_manual(pid, "alias_cbu", "molino.canuelas.mp") is True
+
+        # 2. Consultar señales detalladas
+        senales = mem.consultar_senales_proveedor(pid)
+        assert len(senales) == 2
+        tipos = [s["tipo"] for s in senales]
+        assert "telefono" in tipos
+        assert "alias_cbu" in tipos
+
+        # 3. Eliminar una señal
+        assert mem.eliminar_senal(pid, "telefono", "1145678900") is True
+        senales_post = mem.consultar_senales_proveedor(pid)
+        assert len(senales_post) == 1
+        assert senales_post[0]["tipo"] == "alias_cbu"
+
+        # 4. Listar proveedores con conteo de señales
+        provs_mem = mem.listar_proveedores_memoria()
+        assert len(provs_mem) == 1
+        assert provs_mem[0]["cant_senales"] == 1
