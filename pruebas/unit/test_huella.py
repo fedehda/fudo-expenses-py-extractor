@@ -60,3 +60,23 @@ def test_rankear_huella():
     assert len(candidatos) > 0
     assert candidatos[0].nombre == "Verdulería Don Pepe"
     assert candidatos[0].puntaje >= 0.95
+
+
+def test_generar_nombre_estandarizado():
+    from fudo.imagen import generar_nombre_estandarizado, sanitizar_nombre_archivo
+
+    # Sanitización básica
+    assert sanitizar_nombre_archivo("Distribuidora Pan & Café S.A.!") == "distribuidora_pan_cafe_s_a"
+    assert sanitizar_nombre_archivo("Molino Cañuelas") == "molino_canuelas"
+
+    # Formatos de fecha DD-MM-AAAA
+    nom1 = generar_nombre_estandarizado("12-10-2026", "Molino Cañuelas", ".jpg")
+    assert nom1 == "20261012_molino_canuelas.jpg"
+
+    # Con número de comprobante
+    nom2 = generar_nombre_estandarizado("2026-10-12", "Distribuidora Pan", ".png", comprobante_nro="0001-00004567")
+    assert nom2 == "20261012_distribuidora_pan_0001-00004567.png"
+
+    # Proveedor vacío o None
+    nom3 = generar_nombre_estandarizado("15/05/2026", None, ".jpeg")
+    assert nom3 == "20260515_sin_identificar.jpeg"

@@ -84,7 +84,12 @@ def _limpiar_json(texto: str) -> str:
     return t.strip()
 
 
-def construir_prompt(catalogo: CatalogoFudo, contexto_qr: Optional[str] = None, texto_ocr: Optional[str] = None) -> str:
+def construir_prompt(
+    catalogo: CatalogoFudo,
+    contexto_qr: Optional[str] = None,
+    texto_ocr: Optional[str] = None,
+    proveedor_fijado: Optional[str] = None
+) -> str:
     partes = [
         "Sos un asistente contable de un restaurante en Argentina. Analizá el comprobante de compra adjunto "
         "(foto o PDF) y devolvé los datos en el esquema JSON pedido.",
@@ -108,7 +113,15 @@ def construir_prompt(catalogo: CatalogoFudo, contexto_qr: Optional[str] = None, 
         "",
         "Categorías válidas de Fudo (categoria_fudo_sugerida debe ser una de estas, textual): " + "; ".join(catalogo.categorias),
     ]
-    if catalogo.proveedores:
+    if proveedor_fijado and proveedor_fijado.strip():
+        p_fij = proveedor_fijado.strip()
+        partes += [
+            "",
+            f"INFORMACIÓN PREVIA DEL LOTE: El usuario confirmó que este lote pertenece al proveedor '{p_fij}'.",
+            f"- Usá '{p_fij}' como razon_social y proveedor_fudo_match si no hay otro nombre más explícito.",
+            "- Prestá especial atención a patrones del comprobante (teléfonos, talonario, sellos, alias, artículos habituales) para consolidar su huella."
+        ]
+    elif catalogo.proveedores:
         partes.append("Proveedores ya cargados en Fudo (proveedor_fudo_match solo si es claramente el mismo): "
                       + "; ".join(catalogo.proveedores[:200]))
     if contexto_qr:
@@ -118,6 +131,7 @@ def construir_prompt(catalogo: CatalogoFudo, contexto_qr: Optional[str] = None, 
         partes += ["", "Texto leído por OCR local (puede tener errores, usalo solo como ayuda para números y nombres):",
                    texto_ocr[:4000]]
     return "\n".join(partes)
+
 
 
 class MotorIA:

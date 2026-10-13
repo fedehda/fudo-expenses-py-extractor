@@ -102,6 +102,17 @@ def main():
         metavar="ARCHIVO_SALIDA",
         help="Exportar histórico analítico de precios y comparador de proveedores a Excel"
     )
+    parser.add_argument(
+        "--proveedor", "-p",
+        type=str,
+        default=None,
+        help="Fijar proveedor para procesamiento por lote (asigna todas las facturas del lote y aprende sus patrones en común)"
+    )
+    parser.add_argument(
+        "--renombrar", "-r",
+        action="store_true",
+        help="Renombrar automáticamente las imágenes procesadas en formato fecha_proveedor.ext"
+    )
     args = parser.parse_args()
 
     # Modo 0: Interfaz Gráfica (GUI)
@@ -204,10 +215,13 @@ def main():
     total_monto = 0.0
     lote_id = f"lote_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
 
+    # Mapeo de resultados para posible renombrado: {Path: (fecha, proveedor, nro_comp)}
+    info_archivos = {}
+
     for idx, arch in enumerate(archivos, start=1):
         print(f"[{idx}/{len(archivos)}] Analizando: {arch.name}...")
         try:
-            res = router.procesar(arch, lote_id=lote_id)
+            res = router.procesar(arch, lote_id=lote_id, proveedor_fijado=args.proveedor)
 
             if res.estado == "DUPLICADO":
                 print(f"    [!] Omitido: {res.motivos[0]}")
@@ -228,6 +242,12 @@ def main():
                 archivos_ok.append(arch)
                 monto = float(res.fila_gastos.get("monto", 0.0))
                 total_monto += monto
+
+                info_archivos[arch] = (
+                    res.fila_gastos.get("fecha"),
+                    res.fila_gastos.get("proveedor"),
+                    res.fila_gastos.get("numero_comprobante")
+                )
 
                 # Registrar en base de comprobantes procesados para evitar futuros duplicados
                 ext = res.extraccion
@@ -295,18 +315,26 @@ def main():
     print(f"[*] Archivo Fudo generado:           {salida_excel.name}")
     print(f"    Ruta:                            {salida_excel}")
 
-    # Archivar los comprobantes procesados con éxito
+    # Archivar / Renombrar los comprobantes procesados con éxito
     if not args.no_archive:
         import shutil
+        from fudo.imagen import generar_nombre_estandarizado
         for arch in archivos_ok:
-            destino = dir_procesados / arch.name
-            if destino.exists():
-                destino = dir_procesados / f"{arch.stem}_{timestamp}{arch.suffix}"
+            if args.renombrar and arch in info_archivos:
+                f_f, p_f, n_f = info_archivos[arch]
+                nuevo_nom = generar_nombre_estandarizado(f_f, p_f, arch.suffix, n_f)
+                destino = dir_procesados / nuevo_nom
+            else:
+                destino = dir_procesados / arch.name
+
+            if destino.exists() and destino != arch:
+                destino = dir_procesados / f"{destino.stem}_{timestamp}{destino.suffix}"
             try:
                 shutil.move(str(arch), str(destino))
             except Exception as e:
                 print(f"[!] No se pudo mover {arch.name} a procesados/: {e}")
-        print(f"[*] Comprobantes archivados en:       {dir_procesados.name}/")
+        print(f"[*] Comprobantes archivados en:       {dir_procesados.name}/" + (" (renombrados fecha_proveedor)" if args.renombrar else ""))
+
 
     if filas_revisar:
         print("\n[TIP] Abre el Excel generado y consulta la hoja 'Revisar'.")

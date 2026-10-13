@@ -28,6 +28,7 @@ from .precios import (
     exportar_historico_precios_excel,
     normalizar_producto,
 )
+from .imagen import generar_nombre_estandarizado
 from .router import RouterTickets
 
 
@@ -170,11 +171,29 @@ class FudoExtractorGUI:
                                     command=self._examinar_dir_out)
         btn_browse_out.grid(row=1, column=2, padx=4, pady=4)
 
-        # Checkbox archivar
+        # Fijar Proveedor del Lote
+        lbl_prov = ttk.Label(opts_frame, text="Proveedor del Lote:")
+        lbl_prov.grid(row=2, column=0, sticky="w", pady=4)
+        self.var_fijar_prov = tk.StringVar(value="")
+        lista_provs = ["(Automático - detectar de cada ticket)"] + sorted(self.catalogo.proveedores)
+        self.combo_lote_prov = ttk.Combobox(opts_frame, textvariable=self.var_fijar_prov,
+                                             values=lista_provs, width=51)
+        self.combo_lote_prov.current(0)
+        self.combo_lote_prov.grid(row=2, column=1, padx=6, pady=4, sticky="ew")
+
+        # Opciones de archivo
+        arch_opts_frame = ttk.Frame(opts_frame)
+        arch_opts_frame.grid(row=3, column=1, sticky="w", pady=4)
+
         self.var_archivar = tk.BooleanVar(value=True)
-        chk_arch = ttk.Checkbutton(opts_frame, text="Archivar comprobantes procesados en 'procesados/'",
+        chk_arch = ttk.Checkbutton(arch_opts_frame, text="Archivar comprobantes en 'procesados/'",
                                    variable=self.var_archivar)
-        chk_arch.grid(row=2, column=1, sticky="w", pady=4)
+        chk_arch.pack(side="left", padx=(0, 16))
+
+        self.var_renombrar = tk.BooleanVar(value=True)
+        chk_renom = ttk.Checkbutton(arch_opts_frame, text="Renombrar archivos a 'fecha_proveedor'",
+                                    variable=self.var_renombrar)
+        chk_renom.pack(side="left")
 
         opts_frame.columnconfigure(1, weight=1)
 
@@ -248,11 +267,18 @@ class FudoExtractorGUI:
         dir_out = Path(self.var_dir_out.get())
         dir_out.mkdir(parents=True, exist_ok=True)
         archivar = self.var_archivar.get()
+        renombrar = self.var_renombrar.get()
+        prov_seleccionado = self.var_fijar_prov.get().strip()
+        proveedor_fijado = None
+        if prov_seleccionado and not prov_seleccionado.startswith("(Automático"):
+            proveedor_fijado = prov_seleccionado
 
         from .config import EXTENSIONES_VALIDAS
         archivos = sorted([p for p in dir_in.iterdir() if p.is_file() and p.suffix.lower() in EXTENSIONES_VALIDAS])
 
         self.root.after(0, self._log, f"\n[{datetime.now().strftime('%H:%M:%S')}] Iniciando lote en: {dir_in}\n", "info")
+        if proveedor_fijado:
+            self.root.after(0, self._log, f"[*] Proveedor fijado para este lote: '{proveedor_fijado}'\n", "ok")
         self.root.after(0, self._log, f"[*] Comprobantes detectados: {len(archivos)}\n", "info")
 
         if not archivos:
@@ -271,7 +297,7 @@ class FudoExtractorGUI:
             msg_inicio = f"[{idx}/{len(archivos)}] Analizando {arch.name}..."
             self.root.after(0, self._log, msg_inicio, "dim")
 
-            res = router.procesar(arch, lote_id=lote_id)
+            res = router.procesar(arch, lote_id=lote_id, proveedor_fijado=proveedor_fijado)
 
             if res.estado == "DUPLICADO":
                 tag = "dim"
@@ -306,9 +332,17 @@ class FudoExtractorGUI:
                 dir_proc.mkdir(exist_ok=True)
                 try:
                     import shutil
-                    dest_arch = dir_proc / arch.name
+                    if renombrar and (res.fila_gastos or proveedor_fijado):
+                        fecha_val = res.fila_gastos.get("fecha") if res.fila_gastos else datetime.now().strftime("%Y-%m-%d")
+                        prov_val = (res.fila_gastos.get("proveedor") if res.fila_gastos else None) or proveedor_fijado
+                        num_comp = res.fila_gastos.get("numero_comprobante") if res.fila_gastos else None
+                        nuevo_nombre = generar_nombre_estandarizado(fecha_val, prov_val, arch.suffix, num_comp)
+                        dest_arch = dir_proc / nuevo_nombre
+                    else:
+                        dest_arch = dir_proc / arch.name
+
                     if dest_arch.exists():
-                        dest_arch = dir_proc / f"{arch.stem}_{datetime.now().strftime('%H%M%S')}{arch.suffix}"
+                        dest_arch = dir_proc / f"{dest_arch.stem}_{datetime.now().strftime('%H%M%S')}{dest_arch.suffix}"
                     shutil.move(str(arch), str(dest_arch))
                 except Exception as e:
                     self.root.after(0, self._log, f"    [!] Error al archivar {arch.name}: {e}\n", "dim")

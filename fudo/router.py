@@ -50,7 +50,7 @@ class RouterTickets:
         self.ia = motor_ia
         self.cfg = cfg
 
-    def procesar(self, ruta: Path, lote_id: str) -> ResultadoProcesamiento:
+    def procesar(self, ruta: Path, lote_id: str, proveedor_fijado: Optional[str] = None) -> ResultadoProcesamiento:
         h = hash_archivo(ruta)
 
         # 1. Detección de duplicado por contenido exacto (hash SHA-256)
@@ -87,7 +87,7 @@ class RouterTickets:
             )
             if self.ia.disponible:
                 try:
-                    prompt = construir_prompt(self.catalogo, contexto_qr=contexto_qr)
+                    prompt = construir_prompt(self.catalogo, contexto_qr=contexto_qr, proveedor_fijado=proveedor_fijado)
                     res_ia = self.ia.extraer(bytes_ia, mime_ia, prompt)
                     extraccion = res_ia.extraccion
                     estrategia_usada = f"QR_ARCA + {res_ia.motor}"
@@ -134,10 +134,11 @@ class RouterTickets:
             # Sin QR: extracción general con IA
             if self.ia.disponible:
                 try:
-                    prompt = construir_prompt(self.catalogo)
+                    prompt = construir_prompt(self.catalogo, proveedor_fijado=proveedor_fijado)
                     res_ia = self.ia.extraer(bytes_ia, mime_ia, prompt)
                     extraccion = res_ia.extraccion
                     estrategia_usada = res_ia.motor
+
                 except IANoDisponible as e:
                     # IA no respondió: probar OCR local si está disponible o mandar a pendientes
                     if (self.cfg.ocr_si_falla_ia or not self.ia.disponible) and img_completa:
@@ -191,15 +192,31 @@ class RouterTickets:
         candidatos_huella: List[Candidato] = []
         motivo_proveedor = ""
 
+        # A0) Proveedor fijado explícitamente por el usuario para el lote
+        if proveedor_fijado and proveedor_fijado.strip():
+            proveedor_final = proveedor_fijado.strip()
+            motivo_proveedor = f"Lote asignado a '{proveedor_final}'"
+            mem_fij = self.memoria.buscar_por_nombre(proveedor_final)
+            if mem_fij:
+                categoria_final = mem_fij["categoria_habitual"] or ""
+                caja_final = mem_fij["caja_habitual"] or ""
+                medio_pago_final = mem_fij["medio_pago_habitual"] or ""
+                proveedor_id_asoc = mem_fij["id"]
+            else:
+                prov_cat, _ = self.catalogo.proveedor_catalogo(proveedor_final)
+                if prov_cat:
+                    proveedor_final = prov_cat
+
         # A) Búsqueda por CUIT en memoria
-        datos_mem_cuit = self.memoria.buscar_por_cuit(cuit_clean) if cuit_clean else None
-        if datos_mem_cuit:
-            proveedor_final = datos_mem_cuit["proveedor_fudo"] or datos_mem_cuit["razon_social"]
-            categoria_final = datos_mem_cuit["categoria_habitual"] or ""
-            caja_final = datos_mem_cuit["caja_habitual"] or ""
-            medio_pago_final = datos_mem_cuit["medio_pago_habitual"] or ""
-            proveedor_id_asoc = datos_mem_cuit["id"]
-            motivo_proveedor = f"CUIT {formatear_cuit(cuit_clean)} en memoria"
+        if not proveedor_final:
+            datos_mem_cuit = self.memoria.buscar_por_cuit(cuit_clean) if cuit_clean else None
+            if datos_mem_cuit:
+                proveedor_final = datos_mem_cuit["proveedor_fudo"] or datos_mem_cuit["razon_social"]
+                categoria_final = datos_mem_cuit["categoria_habitual"] or ""
+                caja_final = datos_mem_cuit["caja_habitual"] or ""
+                medio_pago_final = datos_mem_cuit["medio_pago_habitual"] or ""
+                proveedor_id_asoc = datos_mem_cuit["id"]
+                motivo_proveedor = f"CUIT {formatear_cuit(cuit_clean)} en memoria"
 
         # B) Coincidencia por nombre en catálogo o memoria
         if not proveedor_final:
@@ -323,12 +340,13 @@ class RouterTickets:
         if dup_fiscal:
             alertas.append(f"Duplicado fiscal de {dup_fiscal} (CUIT {cuit_clean} {tipo_comp} {num_comp})")
 
-        # F) Proveedor sin identificar o con huella de baja confianza
-        if proveedor_final == self.cfg.proveedor_desconocido:
-            alertas.append("Proveedor no identificado (requiere asignación manual)")
-        elif candidatos_huella and candidatos_huella[0].puntaje < self.cfg.umbral_huella_alto:
-            cand_str = ", ".join(f"{c.nombre} ({c.puntaje:.0%})" for c in candidatos_huella[:2])
-            alertas.append(f"Huella en zona de duda: {cand_str}")
+        # F) Proveedor sin identificar o con huella de baja confianza (si no fue fijado manualmente)
+        if not (proveedor_fijado and proveedor_fijado.strip()):
+            if proveedor_final == self.cfg.proveedor_desconocido:
+                alertas.append("Proveedor no identificado (requiere asignación manual)")
+            elif candidatos_huella and candidatos_huella[0].puntaje < self.cfg.umbral_huella_alto:
+                cand_str = ", ".join(f"{c.nombre} ({c.puntaje:.0%})" for c in candidatos_huella[:2])
+                alertas.append(f"Huella en zona de duda: {cand_str}")
 
         # Si había advertencias en el QR (ej: es Nota de Crédito)
         if datos_qr and datos_qr.advertencias:
