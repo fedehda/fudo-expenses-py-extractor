@@ -372,6 +372,96 @@ class Memoria:
             r = c.execute(f"SELECT 1 FROM articulos_historico WHERE {' OR '.join(condiciones)} LIMIT 1", params).fetchone()
             return r is not None
 
+    def actualizar_articulo_historico(self, articulo_id: int, *,
+                                      producto_original: Optional[str] = None,
+                                      cantidad_texto: Optional[str] = None,
+                                      cantidad_numerica: Optional[float] = None,
+                                      unidad_medida: Optional[str] = None,
+                                      precio_unitario: Optional[float] = None,
+                                      importe_total: Optional[float] = None,
+                                      proveedor_nombre: Optional[str] = None,
+                                      fecha: Optional[str] = None) -> bool:
+        """Actualiza puntualmente los datos de una compra histórica ya indexada."""
+        from .precios import inferir_precio_unitario, normalizar_producto
+        with self._conn() as c:
+            row = c.execute("SELECT * FROM articulos_historico WHERE id = ?", (articulo_id,)).fetchone()
+            if not row:
+                return False
+
+            orig = producto_original if producto_original is not None else row["producto_original"]
+            prod_norm = normalizar_producto(orig)
+            cant_t = cantidad_texto if cantidad_texto is not None else row["cantidad_texto"]
+            cant_n = cantidad_numerica if cantidad_numerica is not None else row["cantidad_numerica"]
+            unid = unidad_medida if unidad_medida is not None else row["unidad_medida"]
+            imp = importe_total if importe_total is not None else row["importe_total"]
+            p_unit = precio_unitario if precio_unitario is not None else row["precio_unitario"]
+            p_unit_final = inferir_precio_unitario(imp, cant_n, p_unit)
+            prov = proveedor_nombre if proveedor_nombre is not None else row["proveedor_nombre"]
+            fec = fecha if fecha is not None else row["fecha"]
+
+            c.execute("""
+                UPDATE articulos_historico
+                SET producto_original = ?,
+                    producto_normalizado = ?,
+                    cantidad_texto = ?,
+                    cantidad_numerica = ?,
+                    unidad_medida = ?,
+                    precio_unitario = ?,
+                    importe_total = ?,
+                    proveedor_nombre = ?,
+                    fecha = ?
+                WHERE id = ?
+            """, (orig, prod_norm, cant_t, cant_n, unid, p_unit_final, imp, prov, fec, articulo_id))
+            return True
+
+    def eliminar_articulo_historico(self, articulo_id: int) -> bool:
+        """Elimina una compra o ítem histórico por su ID."""
+        with self._conn() as c:
+            cur = c.execute("DELETE FROM articulos_historico WHERE id = ?", (articulo_id,))
+            return cur.rowcount > 0
+
+    def reemplazar_articulos_comprobante(self, *,
+                                         numero_comprobante: Optional[str] = None,
+                                         archivo: Optional[str] = None,
+                                         comprobante_hash: Optional[str] = None,
+                                         fecha: str,
+                                         proveedor_id: Optional[int],
+                                         proveedor_nombre: str,
+                                         articulos: List[Any],
+                                         tipo_comprobante: Optional[str] = None) -> int:
+        """Elimina los artículos anteriores de un comprobante y guarda la nueva lista corregida."""
+        if not articulos:
+            return 0
+        condiciones = []
+        params = []
+        if comprobante_hash and str(comprobante_hash).strip():
+            condiciones.append("comprobante_hash = ?")
+            params.append(str(comprobante_hash).strip())
+        if numero_comprobante and str(numero_comprobante).strip():
+            condiciones.append("numero_comprobante = ?")
+            params.append(str(numero_comprobante).strip())
+        if archivo and str(archivo).strip():
+            condiciones.append("archivo = ?")
+            params.append(str(archivo).strip())
+
+        if not condiciones:
+            return 0
+
+        with self._conn() as c:
+            c.execute(f"DELETE FROM articulos_historico WHERE {' OR '.join(condiciones)}", params)
+
+        h_destino = comprobante_hash or (f"manual_{datetime.now().strftime('%Y%m%d%H%M%S')}")
+        return self.guardar_articulos(
+            comprobante_hash=h_destino,
+            fecha=fecha,
+            proveedor_id=proveedor_id,
+            proveedor_nombre=proveedor_nombre,
+            articulos=articulos,
+            tipo_comprobante=tipo_comprobante,
+            numero_comprobante=numero_comprobante,
+            archivo=archivo
+        )
+
     def consultar_todos_los_articulos(self, filtro_texto: Optional[str] = None,
                                       filtro_proveedor: Optional[str] = None,
                                       limite: int = 5000) -> List[ItemHistorico]:

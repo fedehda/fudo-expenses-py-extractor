@@ -251,23 +251,27 @@ def aprender_de_excel(ruta_excel: Path, memoria: Memoria, catalogo: Optional[Cat
                 if pid:
                     confirmados += 1
 
-                # A) Actualizar proveedor en artículos existentes si coinciden por número de factura
-                if nro_comp:
-                    n_act = memoria.actualizar_proveedor_en_articulos(
-                        numero_comprobante=nro_comp,
-                        proveedor_nombre=prov_str,
-                        proveedor_id=pid
-                    )
-                    articulos_afectados += n_act
+                # A) Si el usuario editó o ingresó artículos en el Comentario de la hoja Gastos:
+                # Si el comentario tiene contenido, se re-extraen y se sincronizan los artículos
+                articulos_extraidos = extraer_articulos_de_comentario(coment_raw, monto_total=monto_float) if coment_raw else []
 
-                # B) Si no existen artículos para este comprobante en la base de datos,
-                # recuperarlos e ingerirlos desde el comentario del Excel
-                if not memoria.existen_articulos_para_comprobante(numero_comprobante=nro_comp):
-                    articulos_extraidos = extraer_articulos_de_comentario(coment_raw, monto_total=monto_float)
-                    if articulos_extraidos:
-                        h_mock = hashlib.sha256(f"{prov_str}_{nro_comp}_{fecha_str}_{monto_float}_{r}".encode()).hexdigest()
+                if articulos_extraidos:
+                    h_comp = hashlib.sha256(f"{prov_str}_{nro_comp or ''}_{fecha_str}_{monto_float}_{r}".encode()).hexdigest()
+                    if nro_comp and memoria.existen_articulos_para_comprobante(numero_comprobante=nro_comp):
+                        # Reemplaza los artículos anteriores con las modificaciones hechas en el comentario del Excel
+                        n_ins = memoria.reemplazar_articulos_comprobante(
+                            numero_comprobante=nro_comp,
+                            comprobante_hash=h_comp,
+                            fecha=fecha_str,
+                            proveedor_id=pid,
+                            proveedor_nombre=prov_str,
+                            articulos=articulos_extraidos,
+                            tipo_comprobante=tipo_comp
+                        )
+                        articulos_afectados += n_ins
+                    else:
                         n_ins = memoria.guardar_articulos(
-                            comprobante_hash=h_mock,
+                            comprobante_hash=h_comp,
                             fecha=fecha_str,
                             proveedor_id=pid,
                             proveedor_nombre=prov_str,
@@ -277,6 +281,14 @@ def aprender_de_excel(ruta_excel: Path, memoria: Memoria, catalogo: Optional[Cat
                             archivo=None
                         )
                         articulos_afectados += n_ins
+                elif nro_comp:
+                    # Si no hubo artículos nuevos en el comentario pero cambió el proveedor en la fila, actualiza el proveedor
+                    n_act = memoria.actualizar_proveedor_en_articulos(
+                        numero_comprobante=nro_comp,
+                        proveedor_nombre=prov_str,
+                        proveedor_id=pid
+                    )
+                    articulos_afectados += n_act
 
     finally:
         wb.close()

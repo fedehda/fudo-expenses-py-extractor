@@ -155,3 +155,65 @@ def test_senales_entrenamiento_gestion():
         provs_mem = mem.listar_proveedores_memoria()
         assert len(provs_mem) == 1
         assert provs_mem[0]["cant_senales"] == 1
+
+
+def test_edicion_articulos_historico_y_reemplazo():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db_path = Path(tmpdir) / "test_edit_art.db"
+        mem = Memoria(db_path)
+
+        # 1. Guardar artículos iniciales
+        mem.guardar_articulos(
+            comprobante_hash="hash_factura_1",
+            fecha="20-10-2026",
+            proveedor_id=1,
+            proveedor_nombre="Distribuidora Molino",
+            articulos=[
+                {"descripcion": "Harina 0000", "cantidad": "10 kg", "cantidad_numerica": 10.0, "importe": 12000.0},
+                {"descripcion": "Levadura Seca", "cantidad": "2 kg", "cantidad_numerica": 2.0, "importe": 4000.0}
+            ],
+            numero_comprobante="0001-00001234"
+        )
+
+        arts = mem.consultar_todos_los_articulos(filtro_proveedor="Distribuidora Molino")
+        assert len(arts) == 2
+        id_harina = next(a.id for a in arts if "harina" in a.producto_normalizado)
+
+        # 2. Modificar un artículo directamente (ej. desde GUI)
+        ok = mem.actualizar_articulo_historico(
+            id_harina,
+            producto_original="Harina 0000 Ultra Blanca",
+            cantidad_texto="12 kg",
+            cantidad_numerica=12.0,
+            precio_unitario=1100.0,
+            importe_total=13200.0
+        )
+        assert ok is True
+
+        arts_mod = mem.consultar_todos_los_articulos(filtro_proveedor="Distribuidora Molino")
+        art_harina_mod = next(a for a in arts_mod if a.id == id_harina)
+        assert art_harina_mod.producto_original == "Harina 0000 Ultra Blanca"
+        assert art_harina_mod.cantidad_numerica == 12.0
+        assert art_harina_mod.precio_unitario == 1100.0
+        assert art_harina_mod.importe_total == 13200.0
+
+        # 3. Eliminar un artículo directamente
+        assert mem.eliminar_articulo_historico(id_harina) is True
+        assert len(mem.consultar_todos_los_articulos(filtro_proveedor="Distribuidora Molino")) == 1
+
+        # 4. Reemplazar todos los artículos de un comprobante (como cuando se edita en Excel hoja Gastos)
+        nuevos_items = [
+            {"descripcion": "Grasa Bovina", "cantidad": "5 kg", "cantidad_numerica": 5.0, "importe": 7500.0}
+        ]
+        cant_reemp = mem.reemplazar_articulos_comprobante(
+            numero_comprobante="0001-00001234",
+            fecha="20-10-2026",
+            proveedor_id=1,
+            proveedor_nombre="Distribuidora Molino",
+            articulos=nuevos_items
+        )
+        assert cant_reemp == 1
+        arts_finales = mem.consultar_todos_los_articulos(filtro_proveedor="Distribuidora Molino")
+        assert len(arts_finales) == 1
+        assert arts_finales[0].producto_normalizado == "grasa bovina"
+

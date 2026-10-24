@@ -863,9 +863,10 @@ class FudoExtractorGUI:
         frame_detalle = ttk.LabelFrame(paned, text=" Historial Cronológico de Compras del Producto Seleccionado ", padding=6)
         paned.add(frame_detalle, weight=2)
 
-        cols_det = ("fecha", "proveedor", "original", "cantidad", "unidad", "precio_unit", "total", "comprobante")
+        cols_det = ("id", "fecha", "proveedor", "original", "cantidad", "unidad", "precio_unit", "total", "comprobante")
         self.tree_detalle = ttk.Treeview(frame_detalle, columns=cols_det, show="headings", selectmode="browse")
 
+        self.tree_detalle.heading("id", text="ID")
         self.tree_detalle.heading("fecha", text="Fecha")
         self.tree_detalle.heading("proveedor", text="Proveedor")
         self.tree_detalle.heading("original", text="Descripción Facturada")
@@ -875,13 +876,14 @@ class FudoExtractorGUI:
         self.tree_detalle.heading("total", text="Total")
         self.tree_detalle.heading("comprobante", text="Comprobante")
 
+        self.tree_detalle.column("id", width=45, anchor="center")
         self.tree_detalle.column("fecha", width=85, anchor="center")
-        self.tree_detalle.column("proveedor", width=180, anchor="w")
-        self.tree_detalle.column("original", width=220, anchor="w")
+        self.tree_detalle.column("proveedor", width=160, anchor="w")
+        self.tree_detalle.column("original", width=210, anchor="w")
         self.tree_detalle.column("cantidad", width=60, anchor="center")
-        self.tree_detalle.column("unidad", width=60, anchor="center")
-        self.tree_detalle.column("precio_unit", width=95, anchor="e")
-        self.tree_detalle.column("total", width=95, anchor="e")
+        self.tree_detalle.column("unidad", width=55, anchor="center")
+        self.tree_detalle.column("precio_unit", width=90, anchor="e")
+        self.tree_detalle.column("total", width=90, anchor="e")
         self.tree_detalle.column("comprobante", width=120, anchor="w")
 
         scroll_det_y = ttk.Scrollbar(frame_detalle, orient="vertical", command=self.tree_detalle.yview)
@@ -889,6 +891,18 @@ class FudoExtractorGUI:
 
         self.tree_detalle.pack(side="left", fill="both", expand=True)
         scroll_det_y.pack(side="right", fill="y")
+
+        # Botonera de acciones directas para articulos cargados
+        f_btn_det = ttk.Frame(frame_detalle)
+        f_btn_det.pack(fill="x", side="bottom", pady=4)
+
+        btn_edit_art = ttk.Button(f_btn_det, text="✏️ Editar Artículo...", style="Action.TButton",
+                                  command=self._editar_articulo_seleccionado_dialog)
+        btn_edit_art.pack(side="left", padx=4)
+
+        btn_del_art = ttk.Button(f_btn_det, text="🗑 Eliminar Compra...", style="Action.TButton",
+                                 command=self._eliminar_articulo_seleccionado)
+        btn_del_art.pack(side="left", padx=4)
 
     def _cargar_datos_precios(self):
         # Actualizar lista de proveedores en combo
@@ -959,6 +973,7 @@ class FudoExtractorGUI:
             self.tree_detalle.insert(
                 "", "end",
                 values=(
+                    it.id,
                     it.fecha,
                     it.proveedor_nombre,
                     it.producto_original,
@@ -969,6 +984,137 @@ class FudoExtractorGUI:
                     comp_txt
                 )
             )
+
+    def _editar_articulo_seleccionado_dialog(self):
+        sel = self.tree_detalle.selection()
+        if not sel:
+            messagebox.showinfo("Aviso", "Selecciona una compra en la tabla de detalle inferior para editar.")
+            return
+        vals = self.tree_detalle.item(sel[0], "values")
+        art_id = int(vals[0])
+        fecha_val = vals[1]
+        prov_val = vals[2]
+        prod_val = vals[3]
+        cant_val = vals[4] if vals[4] != "-" else ""
+        unid_val = vals[5] if vals[5] != "-" else ""
+        punit_val = vals[6].replace("$", "").replace(",", "").strip() if vals[6] != "-" else ""
+        tot_val = vals[7].replace("$", "").replace(",", "").strip() if vals[7] != "-" else ""
+
+        diag = tk.Toplevel(self.root)
+        diag.title(f"Editar Compra / Artículo #{art_id}")
+        diag.geometry("460x340")
+        diag.resizable(False, False)
+        diag.transient(self.root)
+        diag.grab_set()
+
+        f_grid = ttk.Frame(diag, padding=14)
+        f_grid.pack(fill="both", expand=True)
+
+        ttk.Label(f_grid, text="Descripción / Producto:", font=("Segoe UI", 9, "bold")).grid(row=0, column=0, sticky="w", pady=4)
+        ent_desc = ttk.Entry(f_grid, width=32)
+        ent_desc.insert(0, prod_val)
+        ent_desc.grid(row=0, column=1, padx=6, pady=4, sticky="ew")
+
+        ttk.Label(f_grid, text="Proveedor:").grid(row=1, column=0, sticky="w", pady=4)
+        ent_prov = ttk.Entry(f_grid, width=32)
+        ent_prov.insert(0, prov_val)
+        ent_prov.grid(row=1, column=1, padx=6, pady=4, sticky="ew")
+
+        ttk.Label(f_grid, text="Fecha (DD-MM-AAAA):").grid(row=2, column=0, sticky="w", pady=4)
+        ent_fec = ttk.Entry(f_grid, width=32)
+        ent_fec.insert(0, fecha_val)
+        ent_fec.grid(row=2, column=1, padx=6, pady=4, sticky="ew")
+
+        ttk.Label(f_grid, text="Cantidad:").grid(row=3, column=0, sticky="w", pady=4)
+        ent_cant = ttk.Entry(f_grid, width=32)
+        ent_cant.insert(0, cant_val)
+        ent_cant.grid(row=3, column=1, padx=6, pady=4, sticky="ew")
+
+        ttk.Label(f_grid, text="Unidad Medida (kg, lts, un):").grid(row=4, column=0, sticky="w", pady=4)
+        ent_unid = ttk.Entry(f_grid, width=32)
+        ent_unid.insert(0, unid_val)
+        ent_unid.grid(row=4, column=1, padx=6, pady=4, sticky="ew")
+
+        ttk.Label(f_grid, text="Precio Unitario ($):").grid(row=5, column=0, sticky="w", pady=4)
+        ent_pu = ttk.Entry(f_grid, width=32)
+        ent_pu.insert(0, punit_val)
+        ent_pu.grid(row=5, column=1, padx=6, pady=4, sticky="ew")
+
+        ttk.Label(f_grid, text="Importe Total ($):").grid(row=6, column=0, sticky="w", pady=4)
+        ent_tot = ttk.Entry(f_grid, width=32)
+        ent_tot.insert(0, tot_val)
+        ent_tot.grid(row=6, column=1, padx=6, pady=4, sticky="ew")
+
+        def _guardar_edicion():
+            n_desc = ent_desc.get().strip()
+            if not n_desc:
+                messagebox.showwarning("Atención", "La descripción del producto no puede estar vacía.", parent=diag)
+                return
+            n_prov = ent_prov.get().strip() or None
+            n_fec = ent_fec.get().strip() or None
+            n_unid = ent_unid.get().strip() or None
+
+            c_num = None
+            raw_c = ent_cant.get().strip().replace(",", ".")
+            if raw_c:
+                try:
+                    c_num = float(raw_c)
+                except ValueError:
+                    c_num = None
+
+            pu_num = None
+            raw_pu = ent_pu.get().strip().replace(",", ".")
+            if raw_pu:
+                try:
+                    pu_num = float(raw_pu)
+                except ValueError:
+                    pu_num = None
+
+            tot_num = None
+            raw_tot = ent_tot.get().strip().replace(",", ".")
+            if raw_tot:
+                try:
+                    tot_num = float(raw_tot)
+                except ValueError:
+                    tot_num = None
+
+            ok = self.memoria.actualizar_articulo_historico(
+                art_id,
+                producto_original=n_desc,
+                cantidad_texto=ent_cant.get().strip() or None,
+                cantidad_numerica=c_num,
+                unidad_medida=n_unid,
+                precio_unitario=pu_num,
+                importe_total=tot_num,
+                proveedor_nombre=n_prov,
+                fecha=n_fec
+            )
+            if ok:
+                diag.destroy()
+                self._cargar_datos_precios()
+                if hasattr(self, "combo_ficha_prov"):
+                    provs = self.memoria.listar_proveedores_con_articulos()
+                    self.combo_ficha_prov["values"] = provs
+                    self._cargar_ficha_proveedor()
+            else:
+                messagebox.showerror("Error", "No se pudo actualizar el artículo.", parent=diag)
+
+        btn_save = ttk.Button(diag, text="💾 Guardar Cambios", style="Primary.TButton", command=_guardar_edicion)
+        btn_save.pack(pady=8)
+
+    def _eliminar_articulo_seleccionado(self):
+        sel = self.tree_detalle.selection()
+        if not sel:
+            messagebox.showinfo("Aviso", "Selecciona una compra en la tabla de detalle inferior para eliminar.")
+            return
+        vals = self.tree_detalle.item(sel[0], "values")
+        art_id = int(vals[0])
+        prod_val = vals[3]
+        fec_val = vals[1]
+
+        if messagebox.askyesno("Confirmar Eliminación", f"¿Deseas eliminar la compra de '{prod_val}' ({fec_val})?"):
+            self.memoria.eliminar_articulo_historico(art_id)
+            self._cargar_datos_precios()
 
     def _exportar_precios_excel(self):
         destino = self.base_dir / "output_fudo" / f"Historico_Precios_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
